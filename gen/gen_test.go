@@ -78,10 +78,11 @@ func TestParseModel(t *testing.T) {
 func TestStructNamesDeterministic(t *testing.T) {
 	reg := loadSubset(t)
 	names := reg.StructNames()
-	if len(names) != 2 || names[0] != "VkApplicationInfo" {
+	// Document order: nested-by-value structs come first in the testdata.
+	if len(names) == 0 || names[0] != "VkExtent3D" {
 		t.Errorf("StructNames order: %v", names)
 	}
-	if sorted := SortedStructNames(reg); sorted[0] != "VkApplicationInfo" || sorted[1] != "VkInstanceCreateInfo" {
+	if sorted := SortedStructNames(reg); sorted[0] != "VkApplicationInfo" || sorted[1] != "VkClearColorValue" {
 		t.Errorf("SortedStructNames: %v", sorted)
 	}
 }
@@ -180,8 +181,17 @@ func TestHelpers(t *testing.T) {
 }
 
 // TestGoTypeOf covers the type-mapping branches not all reachable from the
-// proof subset's emit path (e.g. int32/uint64/float/embedded struct).
+// proof subset's emit path (e.g. int32/uint64/float/embedded struct, enums,
+// handles, fixed arrays, counted-pointer slices).
 func TestGoTypeOf(t *testing.T) {
+	reg := &Registry{
+		Structs:   map[string]*Struct{"VkApplicationInfo": {}, "VkExtent3D": {}, "VkDeviceQueueCreateInfo": {}},
+		EnumTypes: map[string]bool{"VkImageLayout": true},
+		Handles:   map[string]bool{"VkImage": true},
+		EnumValues: map[string]string{
+			"VK_UUID_SIZE": "16",
+		},
+	}
 	cases := []struct {
 		m    *Member
 		want string
@@ -196,11 +206,30 @@ func TestGoTypeOf(t *testing.T) {
 		{&Member{Type: "float"}, "float32"},
 		{&Member{Type: "VkFlags"}, "uint32"},
 		{&Member{Type: "VkInstanceCreateFlags"}, "uint32"},
+		{&Member{Type: "VkImageUsageFlags"}, "uint32"},     // Vk*Flags alias
+		{&Member{Type: "VkSampleCountFlagBits"}, "uint32"}, // Vk*FlagBits alias
+		{&Member{Type: "VkBool32"}, "bool"},
+		{&Member{Type: "VkDeviceSize"}, "uint64"},
+		{&Member{Type: "VkDeviceAddress"}, "uint64"},
+		{&Member{Type: "VkImageLayout"}, "int32"}, // enum
+		{&Member{Type: "VkImage"}, "uint64"},      // handle
 		{&Member{Type: "VkApplicationInfo", Pointer: true}, "*VkApplicationInfo"},
-		{&Member{Type: "VkOffset2D"}, "VkOffset2D"},
+		{&Member{Type: "VkExtent3D"}, "VkExtent3D"}, // nested-by-value
+		// counted-pointer slices
+		{&Member{Type: "float", Pointer: true, Len: "queueCount"}, "[]float32"},
+		{&Member{Type: "uint32_t", Pointer: true, Len: "n"}, "[]uint32"},
+		{&Member{Type: "int32_t", Pointer: true, Len: "n"}, "[]int32"},
+		{&Member{Type: "VkDeviceQueueCreateInfo", Pointer: true, Len: "n"}, "[]VkDeviceQueueCreateInfo"},
+		// fixed arrays
+		{&Member{Type: "char", FixedArrayLen: "VK_UUID_SIZE"}, "string"},
+		{&Member{Type: "uint8_t", FixedArrayLen: "VK_UUID_SIZE"}, "[]byte"},
+		{&Member{Type: "uint32_t", FixedArrayLen: "4"}, "[4]uint32"},
+		{&Member{Type: "int32_t", FixedArrayLen: "4"}, "[4]int32"},
+		{&Member{Type: "float", FixedArrayLen: "4"}, "[4]float32"},
+		{&Member{Type: "uint32_t", FixedArrayLen: "VK_UUID_SIZE"}, "[16]uint32"},
 	}
 	for _, c := range cases {
-		if got := goTypeOf(c.m); got != c.want {
+		if got := goTypeOf(reg, c.m); got != c.want {
 			t.Errorf("goTypeOf(%+v) = %q want %q", c.m, got, c.want)
 		}
 	}
@@ -243,10 +272,18 @@ func TestEmitScalarMembers(t *testing.T) {
 		t.Error("expected error for unsupported member type")
 	}
 
-	// Struct without sType -> error.
+	// Struct without sType -> emitted as a plain nested-by-value struct
+	// (no sType/pNext prologue), e.g. VkExtent3D / VkImageSubresourceRange.
 	reg.Structs["VkNoSType"] = &Struct{Name: "VkNoSType", Members: []*Member{{Name: "x", Type: "uint32_t"}}}
-	if _, err := NewEmitter(reg, []string{"VkNoSType"}, nil).Generate("proof"); err == nil {
-		t.Error("expected error for struct without sType")
+	noType, err := NewEmitter(reg, []string{"VkNoSType"}, nil).Generate("proof")
+	if err != nil {
+		t.Fatalf("sType-less struct should emit, got error: %v", err)
+	}
+	if strings.Contains(string(noType), "pNext = NULL") {
+		t.Error("plain struct must not emit an sType/pNext prologue")
+	}
+	if !strings.Contains(string(noType), "EncodeUint32(v.X)") {
+		t.Errorf("plain struct missing member encode:\n%s", noType)
 	}
 
 	// sType token without a known enum value -> error.

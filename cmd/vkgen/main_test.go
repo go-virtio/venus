@@ -18,40 +18,19 @@ func withArgs(t *testing.T, args []string, fn func()) {
 	fn()
 }
 
-const miniXML = `<registry>
-  <types>
-    <type category="struct" name="VkApplicationInfo">
-      <member values="VK_STRUCTURE_TYPE_APPLICATION_INFO"><type>VkStructureType</type> <name>sType</name></member>
-      <member optional="true">const <type>void</type>* <name>pNext</name></member>
-      <member><type>uint32_t</type> <name>apiVersion</name></member>
-    </type>
-    <type category="struct" name="VkInstanceCreateInfo">
-      <member values="VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO"><type>VkStructureType</type> <name>sType</name></member>
-      <member optional="true">const <type>void</type>* <name>pNext</name></member>
-      <member optional="true"><type>VkInstanceCreateFlags</type> <name>flags</name></member>
-      <member optional="true">const <type>VkApplicationInfo</type>* <name>pApplicationInfo</name></member>
-      <member optional="true"><type>uint32_t</type> <name>enabledLayerCount</name></member>
-      <member len="enabledLayerCount,null-terminated">const <type>char</type>* const* <name>ppEnabledLayerNames</name></member>
-      <member optional="true"><type>uint32_t</type> <name>enabledExtensionCount</name></member>
-      <member len="enabledExtensionCount,null-terminated">const <type>char</type>* const* <name>ppEnabledExtensionNames</name></member>
-    </type>
-  </types>
-  <enums>
-    <enum value="0" name="VK_STRUCTURE_TYPE_APPLICATION_INFO"/>
-    <enum value="1" name="VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO"/>
-  </enums>
-  <commands>
-    <command>
-      <proto><type>VkResult</type> <name>vkCreateInstance</name></proto>
-      <param>const <type>VkInstanceCreateInfo</type>* <name>pCreateInfo</name></param>
-      <param optional="true">const <type>VkAllocationCallbacks</type>* <name>pAllocator</name></param>
-      <param><type>VkInstance</type>* <name>pInstance</name></param>
-    </command>
-  </commands>
-</registry>`
+// fullXML is the generator's curated registry slice; the proof subset
+// (proofStructs/proofCommands/proofReplies) is defined against it.
+func fullXML(t *testing.T) []byte {
+	t.Helper()
+	data, err := os.ReadFile("../../gen/testdata/vk_subset.xml")
+	if err != nil {
+		t.Fatalf("read testdata: %v", err)
+	}
+	return data
+}
 
 func TestGenerate(t *testing.T) {
-	src, err := Generate([]byte(miniXML), "proof", proofStructs, proofCommands)
+	src, err := Generate(fullXML(t), "proof", proofStructs, proofCommands, proofReplies)
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -59,6 +38,9 @@ func TestGenerate(t *testing.T) {
 		"package proof",
 		"func EncodeVkInstanceCreateInfo(",
 		"func Encode_vkCreateInstance(",
+		"func Encode_vkCreateDevice(",
+		"func EncodeVkClearColorValue(",
+		"func Decode_vkCreateInstance_reply(",
 	} {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("missing %q", want)
@@ -67,13 +49,13 @@ func TestGenerate(t *testing.T) {
 }
 
 func TestGenerateParseError(t *testing.T) {
-	if _, err := Generate([]byte("<registry><types"), "proof", proofStructs, proofCommands); err == nil {
+	if _, err := Generate([]byte("<registry><types"), "proof", proofStructs, proofCommands, proofReplies); err == nil {
 		t.Error("expected parse error")
 	}
 }
 
 func TestGenerateEmitError(t *testing.T) {
-	if _, err := Generate([]byte(miniXML), "proof", []string{"VkNope"}, nil); err == nil {
+	if _, err := Generate(fullXML(t), "proof", []string{"VkNope"}, nil, nil); err == nil {
 		t.Error("expected emit error for unknown struct")
 	}
 }
@@ -82,7 +64,7 @@ func TestRunEndToEnd(t *testing.T) {
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "vk.xml")
 	outPath := filepath.Join(dir, "out.go")
-	if err := os.WriteFile(xmlPath, []byte(miniXML), 0o644); err != nil {
+	if err := os.WriteFile(xmlPath, fullXML(t), 0o644); err != nil {
 		t.Fatal(err)
 	}
 
@@ -112,7 +94,7 @@ func TestRunReadError(t *testing.T) {
 func TestRunWriteError(t *testing.T) {
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "vk.xml")
-	if err := os.WriteFile(xmlPath, []byte(miniXML), 0o644); err != nil {
+	if err := os.WriteFile(xmlPath, fullXML(t), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	// Output path points into a non-existent directory -> write fails.
@@ -141,7 +123,7 @@ func TestGenerateFormatError(t *testing.T) {
 	saved := formatSource
 	formatSource = func([]byte) ([]byte, error) { return nil, errors.New("boom") }
 	defer func() { formatSource = saved }()
-	if _, err := Generate([]byte(miniXML), "proof", proofStructs, proofCommands); err == nil {
+	if _, err := Generate(fullXML(t), "proof", proofStructs, proofCommands, proofReplies); err == nil {
 		t.Error("expected gofmt error")
 	}
 }
@@ -178,7 +160,7 @@ func TestMain_(t *testing.T) {
 	dir := t.TempDir()
 	xmlPath := filepath.Join(dir, "vk.xml")
 	outPath := filepath.Join(dir, "out.go")
-	if err := os.WriteFile(xmlPath, []byte(miniXML), 0o644); err != nil {
+	if err := os.WriteFile(xmlPath, fullXML(t), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	withArgs(t, []string{"vkgen", "-xml", xmlPath, "-out", outPath}, func() {

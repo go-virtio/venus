@@ -139,6 +139,74 @@ func TestEncodeHandle(t *testing.T) {
 	}
 }
 
+func TestEncodeBool32(t *testing.T) {
+	// vn_encode_VkBool32 -> vn_encode_uint32_t: 0 or 1, 4-byte LE.
+	eT := NewEncoder()
+	eT.EncodeBool32(true)
+	if want := []byte{1, 0, 0, 0}; !bytes.Equal(eT.Bytes(), want) {
+		t.Fatalf("true got % x want % x", eT.Bytes(), want)
+	}
+	eF := NewEncoder()
+	eF.EncodeBool32(false)
+	if want := []byte{0, 0, 0, 0}; !bytes.Equal(eF.Bytes(), want) {
+		t.Fatalf("false got % x want % x", eF.Bytes(), want)
+	}
+}
+
+func TestEncodeDeviceSize(t *testing.T) {
+	// vn_encode_VkDeviceSize -> vn_encode_uint64_t: 8-byte LE.
+	e := NewEncoder()
+	e.EncodeDeviceSize(0x1000)
+	want := []byte{0x00, 0x10, 0, 0, 0, 0, 0, 0}
+	if !bytes.Equal(e.Bytes(), want) {
+		t.Fatalf("got % x want % x", e.Bytes(), want)
+	}
+}
+
+func TestEncodeUint8Array(t *testing.T) {
+	// A 16-byte UUID-style field: exact multiple of 4, no padding.
+	e := NewEncoder()
+	uuid := []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}
+	e.EncodeUint8Array(uuid)
+	if !bytes.Equal(e.Bytes(), uuid) {
+		t.Fatalf("uuid got % x", e.Bytes())
+	}
+	// A 5-byte field pads to 8 (mirrors blob_array padding on the encode
+	// side for fixed sub-dword arrays).
+	e2 := NewEncoder()
+	e2.EncodeUint8Array([]byte{1, 2, 3, 4, 5})
+	if want := []byte{1, 2, 3, 4, 5, 0, 0, 0}; !bytes.Equal(e2.Bytes(), want) {
+		t.Fatalf("padded got % x want % x", e2.Bytes(), want)
+	}
+}
+
+func TestEncodeUint32Array(t *testing.T) {
+	e := NewEncoder()
+	e.EncodeUint32Array([]uint32{1, 0x04030201})
+	want := []byte{1, 0, 0, 0, 0x01, 0x02, 0x03, 0x04}
+	if !bytes.Equal(e.Bytes(), want) {
+		t.Fatalf("got % x want % x", e.Bytes(), want)
+	}
+}
+
+func TestEncodeInt32Array(t *testing.T) {
+	e := NewEncoder()
+	e.EncodeInt32Array([]int32{-1, 2})
+	want := []byte{0xff, 0xff, 0xff, 0xff, 2, 0, 0, 0}
+	if !bytes.Equal(e.Bytes(), want) {
+		t.Fatalf("got % x want % x", e.Bytes(), want)
+	}
+}
+
+func TestEncodeFloat32Array(t *testing.T) {
+	e := NewEncoder()
+	e.EncodeFloat32Array([]float32{1.0, 0.0})
+	want := []byte{0x00, 0x00, 0x80, 0x3f, 0, 0, 0, 0}
+	if !bytes.Equal(e.Bytes(), want) {
+		t.Fatalf("got % x want % x", e.Bytes(), want)
+	}
+}
+
 func TestLenTracksBytes(t *testing.T) {
 	e := NewEncoder()
 	e.EncodeUint32(1)

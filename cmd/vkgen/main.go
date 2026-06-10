@@ -19,12 +19,39 @@ import (
 	"github.com/go-virtio/venus/gen"
 )
 
-// proofStructs / proofCommands define the M0 proof subset. Top-level structs
-// only; nested structs they reference (e.g. VkApplicationInfo) are pulled in
-// transitively by the emitter.
+// proofStructs / proofCommands / proofReplies define the proof subset. Only
+// top-level structs are listed; nested structs they reference (e.g.
+// VkApplicationInfo, VkExtent3D, VkClearColorValue) are pulled in
+// transitively by the emitter. proofReplies is the subset of commands for
+// which a reply decoder is also emitted (create-style commands whose reply
+// returns a single dispatchable handle).
 var (
-	proofStructs  = []string{"VkInstanceCreateInfo"}
-	proofCommands = []string{"vkCreateInstance"}
+	proofStructs = []string{
+		"VkInstanceCreateInfo",
+		"VkDeviceCreateInfo",
+		"VkImageCreateInfo",
+		"VkMemoryAllocateInfo",
+		"VkCommandPoolCreateInfo",
+		"VkCommandBufferAllocateInfo",
+		"VkImageSubresourceRange",
+		"VkClearColorValue",
+	}
+	proofCommands = []string{
+		"vkCreateInstance",
+		"vkEnumeratePhysicalDevices",
+		"vkCreateDevice",
+		"vkCreateImage",
+		"vkAllocateMemory",
+		"vkCreateCommandPool",
+		"vkCmdClearColorImage",
+	}
+	proofReplies = []string{
+		"vkCreateInstance",
+		"vkCreateDevice",
+		"vkCreateImage",
+		"vkAllocateMemory",
+		"vkCreateCommandPool",
+	}
 )
 
 func main() {
@@ -47,7 +74,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", *xmlPath, err)
 	}
-	src, err := Generate(data, *pkg, proofStructs, proofCommands)
+	src, err := Generate(data, *pkg, proofStructs, proofCommands, proofReplies)
 	if err != nil {
 		return err
 	}
@@ -60,13 +87,14 @@ func run() error {
 
 // Generate parses data and emits gofmt'd Go source for the given subset.
 // Exposed (not just inlined in run) so tests can exercise the full
-// parse->emit->format pipeline without touching the filesystem.
-func Generate(data []byte, pkg string, structs, commands []string) ([]byte, error) {
+// parse->emit->format pipeline without touching the filesystem. replies is
+// the subset of commands for which a reply decoder is also emitted.
+func Generate(data []byte, pkg string, structs, commands, replies []string) ([]byte, error) {
 	reg, err := gen.Parse(data)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := gen.NewEmitter(reg, structs, commands).Generate(pkg)
+	raw, err := gen.NewEmitter(reg, structs, commands).WithReplies(replies).Generate(pkg)
 	if err != nil {
 		return nil, err
 	}

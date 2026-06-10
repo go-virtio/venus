@@ -9,7 +9,7 @@ import "github.com/go-virtio/venus/internal/vncs"
 
 // VkApplicationInfo is the pure-Go input for the generated EncodeVkApplicationInfo
 // encoder. sType and pNext are not fields: sType is fixed by the
-// struct identity and pNext is NULL in M0.
+// struct identity and pNext is NULL (no extension chain emitted).
 type VkApplicationInfo struct {
 	PApplicationName   string
 	ApplicationVersion uint32
@@ -20,7 +20,7 @@ type VkApplicationInfo struct {
 
 // VkInstanceCreateInfo is the pure-Go input for the generated EncodeVkInstanceCreateInfo
 // encoder. sType and pNext are not fields: sType is fixed by the
-// struct identity and pNext is NULL in M0.
+// struct identity and pNext is NULL (no extension chain emitted).
 type VkInstanceCreateInfo struct {
 	Flags                   uint32
 	PApplicationInfo        *VkApplicationInfo
@@ -30,12 +30,106 @@ type VkInstanceCreateInfo struct {
 	PpEnabledExtensionNames []string
 }
 
+// VkDeviceQueueCreateInfo is the pure-Go input for the generated EncodeVkDeviceQueueCreateInfo
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkDeviceQueueCreateInfo struct {
+	Flags            uint32
+	QueueFamilyIndex uint32
+	QueueCount       uint32
+	PQueuePriorities []float32
+}
+
+// VkDeviceCreateInfo is the pure-Go input for the generated EncodeVkDeviceCreateInfo
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkDeviceCreateInfo struct {
+	Flags                   uint32
+	QueueCreateInfoCount    uint32
+	PQueueCreateInfos       []VkDeviceQueueCreateInfo
+	EnabledLayerCount       uint32
+	PpEnabledLayerNames     []string
+	EnabledExtensionCount   uint32
+	PpEnabledExtensionNames []string
+}
+
+// VkExtent3D is the pure-Go input for the generated EncodeVkExtent3D
+// encoder (a plain nested-by-value Vulkan struct, no sType).
+type VkExtent3D struct {
+	Width  uint32
+	Height uint32
+	Depth  uint32
+}
+
+// VkImageCreateInfo is the pure-Go input for the generated EncodeVkImageCreateInfo
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkImageCreateInfo struct {
+	Flags                 uint32
+	ImageType             int32
+	Format                int32
+	Extent                VkExtent3D
+	MipLevels             uint32
+	ArrayLayers           uint32
+	Samples               uint32
+	Tiling                int32
+	Usage                 uint32
+	SharingMode           int32
+	QueueFamilyIndexCount uint32
+	PQueueFamilyIndices   []uint32
+	InitialLayout         int32
+}
+
+// VkMemoryAllocateInfo is the pure-Go input for the generated EncodeVkMemoryAllocateInfo
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkMemoryAllocateInfo struct {
+	AllocationSize  uint64
+	MemoryTypeIndex uint32
+}
+
+// VkCommandPoolCreateInfo is the pure-Go input for the generated EncodeVkCommandPoolCreateInfo
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkCommandPoolCreateInfo struct {
+	Flags            uint32
+	QueueFamilyIndex uint32
+}
+
+// VkCommandBufferAllocateInfo is the pure-Go input for the generated EncodeVkCommandBufferAllocateInfo
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkCommandBufferAllocateInfo struct {
+	CommandPool        uint64
+	Level              int32
+	CommandBufferCount uint32
+}
+
+// VkImageSubresourceRange is the pure-Go input for the generated EncodeVkImageSubresourceRange
+// encoder (a plain nested-by-value Vulkan struct, no sType).
+type VkImageSubresourceRange struct {
+	AspectMask     uint32
+	BaseMipLevel   uint32
+	LevelCount     uint32
+	BaseArrayLayer uint32
+	LayerCount     uint32
+}
+
+// VkClearColorValue is the pure-Go input for the generated EncodeVkClearColorValue union
+// encoder. Tag selects the active arm (0=float32, 1=int32, 2=uint32).
+type VkClearColorValue struct {
+	Tag     uint32
+	Float32 [4]float32
+	Int32   [4]int32
+	Uint32  [4]uint32
+}
+
 // EncodeVkApplicationInfo encodes a VkApplicationInfo onto enc, following Mesa
 // vn_encode_VkApplicationInfo: sType (int32) + pNext (simple_pointer NULL)
 // + self members in declaration order.
 func EncodeVkApplicationInfo(enc *vncs.Encoder, v *VkApplicationInfo) {
 	enc.EncodeInt32(0)             // sType = VK_STRUCTURE_TYPE_APPLICATION_INFO
-	enc.EncodeSimplePointer(false) // pNext = NULL (M0)
+	enc.EncodeSimplePointer(false) // pNext = NULL
 	if v.PApplicationName != "" {
 		enc.EncodeString(v.PApplicationName)
 	} else {
@@ -56,7 +150,7 @@ func EncodeVkApplicationInfo(enc *vncs.Encoder, v *VkApplicationInfo) {
 // + self members in declaration order.
 func EncodeVkInstanceCreateInfo(enc *vncs.Encoder, v *VkInstanceCreateInfo) {
 	enc.EncodeInt32(1)             // sType = VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO
-	enc.EncodeSimplePointer(false) // pNext = NULL (M0)
+	enc.EncodeSimplePointer(false) // pNext = NULL
 	enc.EncodeFlags(v.Flags)
 	if enc.EncodeSimplePointer(v.PApplicationInfo != nil) {
 		EncodeVkApplicationInfo(enc, v.PApplicationInfo)
@@ -81,10 +175,152 @@ func EncodeVkInstanceCreateInfo(enc *vncs.Encoder, v *VkInstanceCreateInfo) {
 	}
 }
 
+// EncodeVkDeviceQueueCreateInfo encodes a VkDeviceQueueCreateInfo onto enc, following Mesa
+// vn_encode_VkDeviceQueueCreateInfo: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkDeviceQueueCreateInfo(enc *vncs.Encoder, v *VkDeviceQueueCreateInfo) {
+	enc.EncodeInt32(2)             // sType = VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO
+	enc.EncodeSimplePointer(false) // pNext = NULL
+	enc.EncodeFlags(v.Flags)
+	enc.EncodeUint32(v.QueueFamilyIndex)
+	enc.EncodeUint32(v.QueueCount)
+	if len(v.PQueuePriorities) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PQueuePriorities)))
+		enc.EncodeFloat32Array(v.PQueuePriorities)
+	} else {
+		enc.EncodeArraySize(0)
+	}
+}
+
+// EncodeVkDeviceCreateInfo encodes a VkDeviceCreateInfo onto enc, following Mesa
+// vn_encode_VkDeviceCreateInfo: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkDeviceCreateInfo(enc *vncs.Encoder, v *VkDeviceCreateInfo) {
+	enc.EncodeInt32(3)             // sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
+	enc.EncodeSimplePointer(false) // pNext = NULL
+	enc.EncodeFlags(v.Flags)
+	enc.EncodeUint32(v.QueueCreateInfoCount)
+	if len(v.PQueueCreateInfos) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PQueueCreateInfos)))
+		for i := range v.PQueueCreateInfos {
+			EncodeVkDeviceQueueCreateInfo(enc, &v.PQueueCreateInfos[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeUint32(v.EnabledLayerCount)
+	if len(v.PpEnabledLayerNames) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PpEnabledLayerNames)))
+		for _, s := range v.PpEnabledLayerNames {
+			enc.EncodeString(s)
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeUint32(v.EnabledExtensionCount)
+	if len(v.PpEnabledExtensionNames) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PpEnabledExtensionNames)))
+		for _, s := range v.PpEnabledExtensionNames {
+			enc.EncodeString(s)
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+}
+
+// EncodeVkExtent3D encodes a VkExtent3D onto enc, following Mesa
+// vn_encode_VkExtent3D: members in declaration order (no sType/pNext).
+func EncodeVkExtent3D(enc *vncs.Encoder, v *VkExtent3D) {
+	enc.EncodeUint32(v.Width)
+	enc.EncodeUint32(v.Height)
+	enc.EncodeUint32(v.Depth)
+}
+
+// EncodeVkImageCreateInfo encodes a VkImageCreateInfo onto enc, following Mesa
+// vn_encode_VkImageCreateInfo: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkImageCreateInfo(enc *vncs.Encoder, v *VkImageCreateInfo) {
+	enc.EncodeInt32(14)            // sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO
+	enc.EncodeSimplePointer(false) // pNext = NULL
+	enc.EncodeFlags(v.Flags)
+	enc.EncodeInt32(v.ImageType) // enum VkImageType
+	enc.EncodeInt32(v.Format)    // enum VkFormat
+	EncodeVkExtent3D(enc, &v.Extent)
+	enc.EncodeUint32(v.MipLevels)
+	enc.EncodeUint32(v.ArrayLayers)
+	enc.EncodeFlags(v.Samples)
+	enc.EncodeInt32(v.Tiling) // enum VkImageTiling
+	enc.EncodeFlags(v.Usage)
+	enc.EncodeInt32(v.SharingMode) // enum VkSharingMode
+	enc.EncodeUint32(v.QueueFamilyIndexCount)
+	if len(v.PQueueFamilyIndices) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PQueueFamilyIndices)))
+		enc.EncodeUint32Array(v.PQueueFamilyIndices)
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeInt32(v.InitialLayout) // enum VkImageLayout
+}
+
+// EncodeVkMemoryAllocateInfo encodes a VkMemoryAllocateInfo onto enc, following Mesa
+// vn_encode_VkMemoryAllocateInfo: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkMemoryAllocateInfo(enc *vncs.Encoder, v *VkMemoryAllocateInfo) {
+	enc.EncodeInt32(5)             // sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO
+	enc.EncodeSimplePointer(false) // pNext = NULL
+	enc.EncodeDeviceSize(v.AllocationSize)
+	enc.EncodeUint32(v.MemoryTypeIndex)
+}
+
+// EncodeVkCommandPoolCreateInfo encodes a VkCommandPoolCreateInfo onto enc, following Mesa
+// vn_encode_VkCommandPoolCreateInfo: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkCommandPoolCreateInfo(enc *vncs.Encoder, v *VkCommandPoolCreateInfo) {
+	enc.EncodeInt32(39)            // sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO
+	enc.EncodeSimplePointer(false) // pNext = NULL
+	enc.EncodeFlags(v.Flags)
+	enc.EncodeUint32(v.QueueFamilyIndex)
+}
+
+// EncodeVkCommandBufferAllocateInfo encodes a VkCommandBufferAllocateInfo onto enc, following Mesa
+// vn_encode_VkCommandBufferAllocateInfo: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkCommandBufferAllocateInfo(enc *vncs.Encoder, v *VkCommandBufferAllocateInfo) {
+	enc.EncodeInt32(40)             // sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO
+	enc.EncodeSimplePointer(false)  // pNext = NULL
+	enc.EncodeHandle(v.CommandPool) // handle VkCommandPool
+	enc.EncodeInt32(v.Level)        // enum VkCommandBufferLevel
+	enc.EncodeUint32(v.CommandBufferCount)
+}
+
+// EncodeVkImageSubresourceRange encodes a VkImageSubresourceRange onto enc, following Mesa
+// vn_encode_VkImageSubresourceRange: members in declaration order (no sType/pNext).
+func EncodeVkImageSubresourceRange(enc *vncs.Encoder, v *VkImageSubresourceRange) {
+	enc.EncodeFlags(v.AspectMask)
+	enc.EncodeUint32(v.BaseMipLevel)
+	enc.EncodeUint32(v.LevelCount)
+	enc.EncodeUint32(v.BaseArrayLayer)
+	enc.EncodeUint32(v.LayerCount)
+}
+
+// EncodeVkClearColorValue encodes the VkClearColorValue union onto enc, following Mesa
+// vn_encode_VkClearColorValue_tag: uint32 tag + array_size(4) + the 4-element arm.
+func EncodeVkClearColorValue(enc *vncs.Encoder, v *VkClearColorValue) {
+	enc.EncodeUint32(v.Tag)
+	enc.EncodeArraySize(4)
+	switch v.Tag {
+	case 0:
+		enc.EncodeFloat32Array(v.Float32[:])
+	case 1:
+		enc.EncodeInt32Array(v.Int32[:])
+	case 2:
+		enc.EncodeUint32Array(v.Uint32[:])
+	}
+}
+
 // Encode_vkCreateInstance frames the vkCreateInstance command: VkCommandTypeEXT
-// (int32 = VK_COMMAND_TYPE_vkCreateInstance_EXT) + cmdFlags (VkFlags) + each arg as an
-// optional simple_pointer followed by its pointee, per Mesa
-// vn_encode_vkCreateInstance.
+// (int32 = VK_COMMAND_TYPE_vkCreateInstance_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkCreateInstance.
 func Encode_vkCreateInstance(enc *vncs.Encoder, cmdFlags uint32, pCreateInfo *VkInstanceCreateInfo, pInstance uint64) {
 	enc.EncodeInt32(0) // cmd_type = VK_COMMAND_TYPE_vkCreateInstance_EXT
 	enc.EncodeFlags(cmdFlags)
@@ -95,4 +331,206 @@ func Encode_vkCreateInstance(enc *vncs.Encoder, cmdFlags uint32, pCreateInfo *Vk
 	if enc.EncodeSimplePointer(pInstance != 0) {
 		enc.EncodeHandle(pInstance)
 	}
+}
+
+// Encode_vkEnumeratePhysicalDevices frames the vkEnumeratePhysicalDevices command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkEnumeratePhysicalDevices_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkEnumeratePhysicalDevices.
+func Encode_vkEnumeratePhysicalDevices(enc *vncs.Encoder, cmdFlags uint32, instance uint64, pPhysicalDeviceCount uint32, pPhysicalDevices []uint64) {
+	enc.EncodeInt32(2) // cmd_type = VK_COMMAND_TYPE_vkEnumeratePhysicalDevices_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(instance) // handle VkInstance
+	if enc.EncodeSimplePointer(true) {
+		enc.EncodeUint32(pPhysicalDeviceCount)
+	}
+	if len(pPhysicalDevices) != 0 {
+		enc.EncodeArraySize(uint64(len(pPhysicalDevices)))
+		for i := range pPhysicalDevices {
+			enc.EncodeHandle(pPhysicalDevices[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+}
+
+// Encode_vkCreateDevice frames the vkCreateDevice command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkCreateDevice_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkCreateDevice.
+func Encode_vkCreateDevice(enc *vncs.Encoder, cmdFlags uint32, physicalDevice uint64, pCreateInfo *VkDeviceCreateInfo, pDevice uint64) {
+	enc.EncodeInt32(11) // cmd_type = VK_COMMAND_TYPE_vkCreateDevice_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(physicalDevice) // handle VkPhysicalDevice
+	if enc.EncodeSimplePointer(pCreateInfo != nil) {
+		EncodeVkDeviceCreateInfo(enc, pCreateInfo)
+	}
+	enc.EncodeSimplePointer(false) // pAllocator = NULL (Venus asserts non-NULL is unreachable)
+	if enc.EncodeSimplePointer(pDevice != 0) {
+		enc.EncodeHandle(pDevice)
+	}
+}
+
+// Encode_vkCreateImage frames the vkCreateImage command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkCreateImage_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkCreateImage.
+func Encode_vkCreateImage(enc *vncs.Encoder, cmdFlags uint32, device uint64, pCreateInfo *VkImageCreateInfo, pImage uint64) {
+	enc.EncodeInt32(54) // cmd_type = VK_COMMAND_TYPE_vkCreateImage_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(device) // handle VkDevice
+	if enc.EncodeSimplePointer(pCreateInfo != nil) {
+		EncodeVkImageCreateInfo(enc, pCreateInfo)
+	}
+	enc.EncodeSimplePointer(false) // pAllocator = NULL (Venus asserts non-NULL is unreachable)
+	if enc.EncodeSimplePointer(pImage != 0) {
+		enc.EncodeHandle(pImage)
+	}
+}
+
+// Encode_vkAllocateMemory frames the vkAllocateMemory command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkAllocateMemory_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkAllocateMemory.
+func Encode_vkAllocateMemory(enc *vncs.Encoder, cmdFlags uint32, device uint64, pAllocateInfo *VkMemoryAllocateInfo, pMemory uint64) {
+	enc.EncodeInt32(21) // cmd_type = VK_COMMAND_TYPE_vkAllocateMemory_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(device) // handle VkDevice
+	if enc.EncodeSimplePointer(pAllocateInfo != nil) {
+		EncodeVkMemoryAllocateInfo(enc, pAllocateInfo)
+	}
+	enc.EncodeSimplePointer(false) // pAllocator = NULL (Venus asserts non-NULL is unreachable)
+	if enc.EncodeSimplePointer(pMemory != 0) {
+		enc.EncodeHandle(pMemory)
+	}
+}
+
+// Encode_vkCreateCommandPool frames the vkCreateCommandPool command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkCreateCommandPool_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkCreateCommandPool.
+func Encode_vkCreateCommandPool(enc *vncs.Encoder, cmdFlags uint32, device uint64, pCreateInfo *VkCommandPoolCreateInfo, pCommandPool uint64) {
+	enc.EncodeInt32(85) // cmd_type = VK_COMMAND_TYPE_vkCreateCommandPool_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(device) // handle VkDevice
+	if enc.EncodeSimplePointer(pCreateInfo != nil) {
+		EncodeVkCommandPoolCreateInfo(enc, pCreateInfo)
+	}
+	enc.EncodeSimplePointer(false) // pAllocator = NULL (Venus asserts non-NULL is unreachable)
+	if enc.EncodeSimplePointer(pCommandPool != 0) {
+		enc.EncodeHandle(pCommandPool)
+	}
+}
+
+// Encode_vkCmdClearColorImage frames the vkCmdClearColorImage command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkCmdClearColorImage_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkCmdClearColorImage.
+func Encode_vkCmdClearColorImage(enc *vncs.Encoder, cmdFlags uint32, commandBuffer uint64, image uint64, imageLayout int32, pColor *VkClearColorValue, rangeCount uint32, pRanges []VkImageSubresourceRange) {
+	enc.EncodeInt32(119) // cmd_type = VK_COMMAND_TYPE_vkCmdClearColorImage_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(commandBuffer) // handle VkCommandBuffer
+	enc.EncodeHandle(image)         // handle VkImage
+	enc.EncodeInt32(imageLayout)    // enum VkImageLayout
+	if enc.EncodeSimplePointer(pColor != nil) {
+		EncodeVkClearColorValue(enc, pColor)
+	}
+	enc.EncodeUint32(rangeCount)
+	if len(pRanges) != 0 {
+		enc.EncodeArraySize(uint64(len(pRanges)))
+		for i := range pRanges {
+			EncodeVkImageSubresourceRange(enc, &pRanges[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+}
+
+// VkCreateInstanceReplyCmdType is the VkCommandTypeEXT the vkCreateInstance reply echoes
+// (VK_COMMAND_TYPE_vkCreateInstance_EXT).
+const VkCreateInstanceReplyCmdType int32 = 0
+
+// Decode_vkCreateInstance_reply decodes the vkCreateInstance reply, per Mesa
+// vn_decode_vkCreateInstance_reply: command-type echo + VkResult +
+// simple_pointer(pInstance). ok is the simple_pointer presence flag;
+// cmdType is the echoed command type the caller verifies against
+// VkCreateInstanceReplyCmdType (Mesa asserts the same equality).
+func Decode_vkCreateInstance_reply(dec *vncs.Decoder) (cmdType int32, result int32, pInstance uint64, ok bool) {
+	cmdType = dec.DecodeInt32() // echoed VK_COMMAND_TYPE_vkCreateInstance_EXT
+	result = dec.DecodeResult()
+	if dec.DecodeSimplePointer() {
+		pInstance = dec.DecodeHandle()
+		ok = true
+	}
+	return cmdType, result, pInstance, ok
+}
+
+// VkCreateDeviceReplyCmdType is the VkCommandTypeEXT the vkCreateDevice reply echoes
+// (VK_COMMAND_TYPE_vkCreateDevice_EXT).
+const VkCreateDeviceReplyCmdType int32 = 11
+
+// Decode_vkCreateDevice_reply decodes the vkCreateDevice reply, per Mesa
+// vn_decode_vkCreateDevice_reply: command-type echo + VkResult +
+// simple_pointer(pDevice). ok is the simple_pointer presence flag;
+// cmdType is the echoed command type the caller verifies against
+// VkCreateDeviceReplyCmdType (Mesa asserts the same equality).
+func Decode_vkCreateDevice_reply(dec *vncs.Decoder) (cmdType int32, result int32, pDevice uint64, ok bool) {
+	cmdType = dec.DecodeInt32() // echoed VK_COMMAND_TYPE_vkCreateDevice_EXT
+	result = dec.DecodeResult()
+	if dec.DecodeSimplePointer() {
+		pDevice = dec.DecodeHandle()
+		ok = true
+	}
+	return cmdType, result, pDevice, ok
+}
+
+// VkCreateImageReplyCmdType is the VkCommandTypeEXT the vkCreateImage reply echoes
+// (VK_COMMAND_TYPE_vkCreateImage_EXT).
+const VkCreateImageReplyCmdType int32 = 54
+
+// Decode_vkCreateImage_reply decodes the vkCreateImage reply, per Mesa
+// vn_decode_vkCreateImage_reply: command-type echo + VkResult +
+// simple_pointer(pImage). ok is the simple_pointer presence flag;
+// cmdType is the echoed command type the caller verifies against
+// VkCreateImageReplyCmdType (Mesa asserts the same equality).
+func Decode_vkCreateImage_reply(dec *vncs.Decoder) (cmdType int32, result int32, pImage uint64, ok bool) {
+	cmdType = dec.DecodeInt32() // echoed VK_COMMAND_TYPE_vkCreateImage_EXT
+	result = dec.DecodeResult()
+	if dec.DecodeSimplePointer() {
+		pImage = dec.DecodeHandle()
+		ok = true
+	}
+	return cmdType, result, pImage, ok
+}
+
+// VkAllocateMemoryReplyCmdType is the VkCommandTypeEXT the vkAllocateMemory reply echoes
+// (VK_COMMAND_TYPE_vkAllocateMemory_EXT).
+const VkAllocateMemoryReplyCmdType int32 = 21
+
+// Decode_vkAllocateMemory_reply decodes the vkAllocateMemory reply, per Mesa
+// vn_decode_vkAllocateMemory_reply: command-type echo + VkResult +
+// simple_pointer(pMemory). ok is the simple_pointer presence flag;
+// cmdType is the echoed command type the caller verifies against
+// VkAllocateMemoryReplyCmdType (Mesa asserts the same equality).
+func Decode_vkAllocateMemory_reply(dec *vncs.Decoder) (cmdType int32, result int32, pMemory uint64, ok bool) {
+	cmdType = dec.DecodeInt32() // echoed VK_COMMAND_TYPE_vkAllocateMemory_EXT
+	result = dec.DecodeResult()
+	if dec.DecodeSimplePointer() {
+		pMemory = dec.DecodeHandle()
+		ok = true
+	}
+	return cmdType, result, pMemory, ok
+}
+
+// VkCreateCommandPoolReplyCmdType is the VkCommandTypeEXT the vkCreateCommandPool reply echoes
+// (VK_COMMAND_TYPE_vkCreateCommandPool_EXT).
+const VkCreateCommandPoolReplyCmdType int32 = 85
+
+// Decode_vkCreateCommandPool_reply decodes the vkCreateCommandPool reply, per Mesa
+// vn_decode_vkCreateCommandPool_reply: command-type echo + VkResult +
+// simple_pointer(pCommandPool). ok is the simple_pointer presence flag;
+// cmdType is the echoed command type the caller verifies against
+// VkCreateCommandPoolReplyCmdType (Mesa asserts the same equality).
+func Decode_vkCreateCommandPool_reply(dec *vncs.Decoder) (cmdType int32, result int32, pCommandPool uint64, ok bool) {
+	cmdType = dec.DecodeInt32() // echoed VK_COMMAND_TYPE_vkCreateCommandPool_EXT
+	result = dec.DecodeResult()
+	if dec.DecodeSimplePointer() {
+		pCommandPool = dec.DecodeHandle()
+		ok = true
+	}
+	return cmdType, result, pCommandPool, ok
 }

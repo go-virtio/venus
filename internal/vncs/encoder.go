@@ -211,3 +211,77 @@ func (e *Encoder) EncodeString(s string) {
 func (e *Encoder) EncodeHandle(id uint64) {
 	e.EncodeUint64(id)
 }
+
+// EncodeBool32 mirrors vn_encode_VkBool32 (typedef uint32_t VkBool32):
+//
+//	static inline void
+//	vn_encode_VkBool32(struct vn_cs_encoder *enc, const VkBool32 *val)
+//	{
+//	    vn_encode_uint32_t(enc, val);
+//	}
+//
+// i.e. a 4-byte LE uint32, 0 or 1.
+func (e *Encoder) EncodeBool32(v bool) {
+	if v {
+		e.EncodeUint32(1)
+	} else {
+		e.EncodeUint32(0)
+	}
+}
+
+// EncodeDeviceSize mirrors vn_encode_VkDeviceSize (typedef uint64_t
+// VkDeviceSize):
+//
+//	static inline void
+//	vn_encode_VkDeviceSize(struct vn_cs_encoder *enc, const VkDeviceSize *val)
+//	{
+//	    vn_encode_uint64_t(enc, val);
+//	}
+//
+// i.e. an 8-byte LE uint64. VkDeviceAddress is the same path.
+func (e *Encoder) EncodeDeviceSize(v uint64) {
+	e.EncodeUint64(v)
+}
+
+// EncodeUint8Array mirrors vn_encode_uint8_t_array, used for fixed-size
+// byte fields such as VkPhysicalDeviceProperties.pipelineCacheUUID[16]:
+//
+//	const size_t size = sizeof(*val) * count;
+//	vn_encode(enc, size, val, size);
+//
+// Because uint8 has size 1, the byte count equals the element count; the
+// caller pre-pads to a 4-byte multiple exactly as the fixed-array sizes
+// (VK_UUID_SIZE == 16, etc.) always are. In Venus a fixed array is preceded
+// by its own vn_encode_array_size(N); that prefix is emitted by the
+// generated struct encoder, not here.
+func (e *Encoder) EncodeUint8Array(data []byte) {
+	e.write((len(data)+3)&^3, data)
+}
+
+// EncodeUint32Array mirrors vn_encode_uint32_t_array:
+//
+//	const size_t size = sizeof(*val) * count;  // 4*count
+//	vn_encode(enc, size, val, size);
+//
+// A contiguous run of 4-byte LE dwords; size is already a multiple of 4.
+func (e *Encoder) EncodeUint32Array(vals []uint32) {
+	for _, v := range vals {
+		e.EncodeUint32(v)
+	}
+}
+
+// EncodeInt32Array mirrors vn_encode_int32_t_array (same wire shape as
+// uint32_array; used by the VkClearColorValue int32 union arm).
+func (e *Encoder) EncodeInt32Array(vals []int32) {
+	for _, v := range vals {
+		e.EncodeInt32(v)
+	}
+}
+
+// EncodeFloat32Array mirrors vn_encode_float_array (used by the
+// VkClearColorValue float32 union arm).
+func (e *Encoder) EncodeFloat32Array(vals []float32) {
+	for _, v := range vals {
+		e.EncodeFloat32(v)
+	}
+}
