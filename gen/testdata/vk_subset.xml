@@ -36,6 +36,67 @@
       <member><type>uint32_t</type>               <name>layerCount</name></member>
     </type>
 
+    <!-- input-only feature struct: the trailing optional pEnabledFeatures
+         member of VkDeviceCreateInfo. 55 VkBool32 in declaration order,
+         transcribed from vk.xml; the encoder is 55x EncodeBool32. -->
+    <type category="struct" name="VkPhysicalDeviceFeatures">
+      <member><type>VkBool32</type> <name>robustBufferAccess</name></member>
+      <member><type>VkBool32</type> <name>fullDrawIndexUint32</name></member>
+      <member><type>VkBool32</type> <name>imageCubeArray</name></member>
+      <member><type>VkBool32</type> <name>independentBlend</name></member>
+      <member><type>VkBool32</type> <name>geometryShader</name></member>
+      <member><type>VkBool32</type> <name>tessellationShader</name></member>
+      <member><type>VkBool32</type> <name>sampleRateShading</name></member>
+      <member><type>VkBool32</type> <name>dualSrcBlend</name></member>
+      <member><type>VkBool32</type> <name>logicOp</name></member>
+      <member><type>VkBool32</type> <name>multiDrawIndirect</name></member>
+      <member><type>VkBool32</type> <name>drawIndirectFirstInstance</name></member>
+      <member><type>VkBool32</type> <name>depthClamp</name></member>
+      <member><type>VkBool32</type> <name>depthBiasClamp</name></member>
+      <member><type>VkBool32</type> <name>fillModeNonSolid</name></member>
+      <member><type>VkBool32</type> <name>depthBounds</name></member>
+      <member><type>VkBool32</type> <name>wideLines</name></member>
+      <member><type>VkBool32</type> <name>largePoints</name></member>
+      <member><type>VkBool32</type> <name>alphaToOne</name></member>
+      <member><type>VkBool32</type> <name>multiViewport</name></member>
+      <member><type>VkBool32</type> <name>samplerAnisotropy</name></member>
+      <member><type>VkBool32</type> <name>textureCompressionETC2</name></member>
+      <member><type>VkBool32</type> <name>textureCompressionASTC_LDR</name></member>
+      <member><type>VkBool32</type> <name>textureCompressionBC</name></member>
+      <member><type>VkBool32</type> <name>occlusionQueryPrecise</name></member>
+      <member><type>VkBool32</type> <name>pipelineStatisticsQuery</name></member>
+      <member><type>VkBool32</type> <name>vertexPipelineStoresAndAtomics</name></member>
+      <member><type>VkBool32</type> <name>fragmentStoresAndAtomics</name></member>
+      <member><type>VkBool32</type> <name>shaderTessellationAndGeometryPointSize</name></member>
+      <member><type>VkBool32</type> <name>shaderImageGatherExtended</name></member>
+      <member><type>VkBool32</type> <name>shaderStorageImageExtendedFormats</name></member>
+      <member><type>VkBool32</type> <name>shaderStorageImageMultisample</name></member>
+      <member><type>VkBool32</type> <name>shaderStorageImageReadWithoutFormat</name></member>
+      <member><type>VkBool32</type> <name>shaderStorageImageWriteWithoutFormat</name></member>
+      <member><type>VkBool32</type> <name>shaderUniformBufferArrayDynamicIndexing</name></member>
+      <member><type>VkBool32</type> <name>shaderSampledImageArrayDynamicIndexing</name></member>
+      <member><type>VkBool32</type> <name>shaderStorageBufferArrayDynamicIndexing</name></member>
+      <member><type>VkBool32</type> <name>shaderStorageImageArrayDynamicIndexing</name></member>
+      <member><type>VkBool32</type> <name>shaderClipDistance</name></member>
+      <member><type>VkBool32</type> <name>shaderCullDistance</name></member>
+      <member><type>VkBool32</type> <name>shaderFloat64</name></member>
+      <member><type>VkBool32</type> <name>shaderInt64</name></member>
+      <member><type>VkBool32</type> <name>shaderInt16</name></member>
+      <member><type>VkBool32</type> <name>shaderResourceResidency</name></member>
+      <member><type>VkBool32</type> <name>shaderResourceMinLod</name></member>
+      <member><type>VkBool32</type> <name>sparseBinding</name></member>
+      <member><type>VkBool32</type> <name>sparseResidencyBuffer</name></member>
+      <member><type>VkBool32</type> <name>sparseResidencyImage2D</name></member>
+      <member><type>VkBool32</type> <name>sparseResidencyImage3D</name></member>
+      <member><type>VkBool32</type> <name>sparseResidency2Samples</name></member>
+      <member><type>VkBool32</type> <name>sparseResidency4Samples</name></member>
+      <member><type>VkBool32</type> <name>sparseResidency8Samples</name></member>
+      <member><type>VkBool32</type> <name>sparseResidency16Samples</name></member>
+      <member><type>VkBool32</type> <name>sparseResidencyAliased</name></member>
+      <member><type>VkBool32</type> <name>variableMultisampleRate</name></member>
+      <member><type>VkBool32</type> <name>inheritedQueries</name></member>
+    </type>
+
     <!-- tagged union -->
     <type category="union" name="VkClearColorValue">
       <member><type>float</type>                  <name>float32</name>[4]</member>
@@ -81,6 +142,7 @@
       <member len="enabledLayerCount,null-terminated">const <type>char</type>* const*      <name>ppEnabledLayerNames</name></member>
       <member optional="true"><type>uint32_t</type>               <name>enabledExtensionCount</name></member>
       <member len="enabledExtensionCount,null-terminated">const <type>char</type>* const*      <name>ppEnabledExtensionNames</name></member>
+      <member optional="true">const <type>VkPhysicalDeviceFeatures</type>* <name>pEnabledFeatures</name></member>
     </type>
     <type category="struct" name="VkImageCreateInfo">
       <member values="VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO"><type>VkStructureType</type> <name>sType</name></member>

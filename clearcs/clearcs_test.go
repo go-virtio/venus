@@ -206,7 +206,7 @@ func TestEncodersNonEmpty(t *testing.T) {
 		"QueueFamilyProperties":   EncodeGetPhysicalDeviceQueueFamilyProperties(1, 0x1, 0, nil),
 		"CreateDevice":            EncodeCreateDevice(1, 0x1, &VkDeviceCreateInfo{QueueCreateInfoCount: 1, PQueueCreateInfos: []VkDeviceQueueCreateInfo{{QueueCount: 1, PQueuePriorities: []float32{1}}}}, 0x2),
 		"GetDeviceQueue":          EncodeGetDeviceQueue(1, 0x2, 0, 0, 0x7),
-		"CreateImage":             EncodeCreateImage(1, 0x2, &VkImageCreateInfo{ImageType: 1, Format: 37, Extent: VkExtent3D{16, 16, 1}, MipLevels: 1, ArrayLayers: 1, Samples: 1, Tiling: 1, Usage: 2}, 0x3),
+		"CreateImage":             EncodeCreateImage(1, 0x2, &VkImageCreateInfo{ImageType: 1, Format: 37, Extent: VkExtent3D{Width: 16, Height: 16, Depth: 1}, MipLevels: 1, ArrayLayers: 1, Samples: 1, Tiling: 1, Usage: 2}, 0x3),
 		"ImageMemoryRequirements": EncodeGetImageMemoryRequirements(1, 0x2, 0x3),
 		"AllocateMemory":          EncodeAllocateMemory(1, 0x2, &VkMemoryAllocateInfo{AllocationSize: 0x1000, MemoryTypeIndex: 0}, 0x4),
 		"BindImageMemory":         EncodeBindImageMemory(1, 0x2, 0x3, 0x4, 0),

@@ -164,7 +164,14 @@ func TestEncodeVkImageCreateInfoSharedQueues(t *testing.T) {
 // from Mesa vn_encode_VkDeviceCreateInfo / _self: sType(3) + pNext NULL +
 // flags + queueCreateInfoCount + (pQueueCreateInfos present: array_size(N) +
 // each VkDeviceQueueCreateInfo) + enabledLayerCount + layer names +
-// enabledExtensionCount + ext names. pEnabledFeatures is not in our subset.
+// enabledExtensionCount + ext names + the trailing optional pEnabledFeatures.
+// Mesa vn_encode_VkDeviceCreateInfo_self (vn_protocol_driver_device.h) ends:
+//
+//	if (vn_encode_simple_pointer(enc, val->pEnabledFeatures))
+//	    vn_encode_VkPhysicalDeviceFeatures(enc, val->pEnabledFeatures);
+//
+// so we emit simple_pointer(PEnabledFeatures!=nil) (le64 1/0) and, when
+// present, the 55-VkBool32 body.
 func deviceQueueCreateInfoExpected(q *VkDeviceQueueCreateInfo) []byte {
 	var w []byte
 	w = append(w, le32(2)...) // sType DEVICE_QUEUE_CREATE_INFO
@@ -215,6 +222,50 @@ func deviceCreateInfoExpected(dc *VkDeviceCreateInfo) []byte {
 	} else {
 		w = append(w, le64(0)...)
 	}
+	// Trailing optional pEnabledFeatures (Mesa vn_encode_VkDeviceCreateInfo_self):
+	// simple_pointer present? then the 55-VkBool32 VkPhysicalDeviceFeatures body.
+	if dc.PEnabledFeatures != nil {
+		w = append(w, le64(1)...) // simple_pointer(pEnabledFeatures) present
+		w = append(w, physicalDeviceFeaturesExpected(dc.PEnabledFeatures)...)
+	} else {
+		w = append(w, le64(0)...) // simple_pointer(pEnabledFeatures) = NULL
+	}
+	return w
+}
+
+// physicalDeviceFeaturesExpected hand-derives the 55-VkBool32 body of a
+// VkPhysicalDeviceFeatures from Mesa vn_encode_VkPhysicalDeviceFeatures
+// (vn_protocol_driver_device.h): 55 vn_encode_VkBool32 in declaration order,
+// robustBufferAccess … inheritedQueries, each a 4-byte LE uint32 (0 or 1).
+func physicalDeviceFeaturesExpected(f *VkPhysicalDeviceFeatures) []byte {
+	var w []byte
+	bools := []bool{
+		f.RobustBufferAccess, f.FullDrawIndexUint32, f.ImageCubeArray, f.IndependentBlend,
+		f.GeometryShader, f.TessellationShader, f.SampleRateShading, f.DualSrcBlend,
+		f.LogicOp, f.MultiDrawIndirect, f.DrawIndirectFirstInstance, f.DepthClamp,
+		f.DepthBiasClamp, f.FillModeNonSolid, f.DepthBounds, f.WideLines,
+		f.LargePoints, f.AlphaToOne, f.MultiViewport, f.SamplerAnisotropy,
+		f.TextureCompressionETC2, f.TextureCompressionASTC_LDR, f.TextureCompressionBC,
+		f.OcclusionQueryPrecise, f.PipelineStatisticsQuery, f.VertexPipelineStoresAndAtomics,
+		f.FragmentStoresAndAtomics, f.ShaderTessellationAndGeometryPointSize,
+		f.ShaderImageGatherExtended, f.ShaderStorageImageExtendedFormats,
+		f.ShaderStorageImageMultisample, f.ShaderStorageImageReadWithoutFormat,
+		f.ShaderStorageImageWriteWithoutFormat, f.ShaderUniformBufferArrayDynamicIndexing,
+		f.ShaderSampledImageArrayDynamicIndexing, f.ShaderStorageBufferArrayDynamicIndexing,
+		f.ShaderStorageImageArrayDynamicIndexing, f.ShaderClipDistance, f.ShaderCullDistance,
+		f.ShaderFloat64, f.ShaderInt64, f.ShaderInt16, f.ShaderResourceResidency,
+		f.ShaderResourceMinLod, f.SparseBinding, f.SparseResidencyBuffer,
+		f.SparseResidencyImage2D, f.SparseResidencyImage3D, f.SparseResidency2Samples,
+		f.SparseResidency4Samples, f.SparseResidency8Samples, f.SparseResidency16Samples,
+		f.SparseResidencyAliased, f.VariableMultisampleRate, f.InheritedQueries,
+	}
+	for _, bv := range bools {
+		var u uint32
+		if bv {
+			u = 1
+		}
+		w = append(w, le32(u)...)
+	}
 	return w
 }
 
@@ -259,6 +310,69 @@ func TestEncodeVkDeviceCreateInfoEmptyQueues(t *testing.T) {
 	EncodeVkDeviceQueueCreateInfo(eq, q)
 	if want := deviceQueueCreateInfoExpected(q); !bytes.Equal(eq.Bytes(), want) {
 		t.Fatalf("empty-prio queue\n got % x\nwant % x", eq.Bytes(), want)
+	}
+}
+
+// TestEncodeVkDeviceCreateInfoEnabledFeatures exercises the trailing optional
+// pEnabledFeatures member (non-NULL arm) and the VkPhysicalDeviceFeatures
+// encoder. A couple of true bits at known positions verify the 55-VkBool32
+// body is laid out in Mesa declaration order (robustBufferAccess is bit 0,
+// inheritedQueries is the last).
+func TestEncodeVkDeviceCreateInfoEnabledFeatures(t *testing.T) {
+	dc := &VkDeviceCreateInfo{
+		PEnabledFeatures: &VkPhysicalDeviceFeatures{
+			RobustBufferAccess: true, // first member -> first dword = 1
+			SamplerAnisotropy:  true,
+			InheritedQueries:   true, // last member -> last dword = 1
+		},
+	}
+	e := vncs.NewEncoder()
+	EncodeVkDeviceCreateInfo(e, dc)
+	want := deviceCreateInfoExpected(dc)
+	if !bytes.Equal(e.Bytes(), want) {
+		t.Fatalf("VkDeviceCreateInfo w/ features\n got % x\nwant % x", e.Bytes(), want)
+	}
+	// Cross-check the features tail independently: simple_pointer(1) + 55 dwords,
+	// with dword 0 (robustBufferAccess) and the final dword (inheritedQueries)
+	// set, and dword 19 (samplerAnisotropy) set.
+	tail := e.Bytes()[len(deviceCreateInfoExpected(&VkDeviceCreateInfo{}))-8:]
+	if !bytes.Equal(tail[:8], le64(1)) {
+		t.Fatalf("features simple_pointer = % x, want present (1)", tail[:8])
+	}
+	body := tail[8:]
+	if len(body) != 55*4 {
+		t.Fatalf("features body len = %d, want %d", len(body), 55*4)
+	}
+	if !bytes.Equal(body[0:4], le32(1)) {
+		t.Fatalf("robustBufferAccess dword = % x, want 1", body[0:4])
+	}
+	if !bytes.Equal(body[19*4:19*4+4], le32(1)) {
+		t.Fatalf("samplerAnisotropy dword = % x, want 1", body[19*4:19*4+4])
+	}
+	if !bytes.Equal(body[54*4:54*4+4], le32(1)) {
+		t.Fatalf("inheritedQueries dword = % x, want 1", body[54*4:54*4+4])
+	}
+}
+
+// TestEncodeVkPhysicalDeviceFeatures byte-validates the standalone 55-VkBool32
+// encoder against its hand-derived expectation (Mesa
+// vn_encode_VkPhysicalDeviceFeatures).
+func TestEncodeVkPhysicalDeviceFeatures(t *testing.T) {
+	f := &VkPhysicalDeviceFeatures{
+		GeometryShader:   true, // member index 4
+		ShaderFloat64:    true, // member index 39
+		InheritedQueries: true, // member index 54
+	}
+	e := vncs.NewEncoder()
+	EncodeVkPhysicalDeviceFeatures(e, f)
+	if want := physicalDeviceFeaturesExpected(f); !bytes.Equal(e.Bytes(), want) {
+		t.Fatalf("VkPhysicalDeviceFeatures\n got % x\nwant % x", e.Bytes(), want)
+	}
+	// All-false produces 220 zero bytes.
+	z := vncs.NewEncoder()
+	EncodeVkPhysicalDeviceFeatures(z, &VkPhysicalDeviceFeatures{})
+	if got := z.Bytes(); len(got) != 55*4 || !bytes.Equal(got, make([]byte, 55*4)) {
+		t.Fatalf("all-false features = % x", got)
 	}
 }
 

@@ -107,6 +107,14 @@ clean; zero external dependencies.
     `pInheritanceInfo` → full `VkCommandBufferInheritanceInfo` arm) and the
     by-value `uint64`/`VkBool32`/`VkDeviceSize` command params
     (`vkWaitForFences` timeout/waitAll, `vkBindImageMemory` memoryOffset).
+  - **Trailing optional struct-pointer members** — `VkDeviceCreateInfo`'s
+    `pEnabledFeatures` (`if simple_pointer(p) vn_encode_VkPhysicalDeviceFeatures`)
+    is now emitted by the generator, with the full 55-`VkBool32`
+    `VkPhysicalDeviceFeatures` encoder. Omitting it left the host peeking 8 bytes
+    not on the wire (`vkr: failed to peek 8 bytes` → `vkCreateDevice resulted in
+    CS error`), proven live against a real `virgl_test_server --venus` host; the
+    former `clearcs` re-encode workaround is gone (collapsed to a bare call into
+    the generated encoder, byte-identical output).
 - **Generator gaps still open**, each stopped at a clean boundary rather than
   guessed:
   - **The full `VkPhysicalDeviceLimits` (all ~106 members).** The decode

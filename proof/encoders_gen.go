@@ -40,6 +40,66 @@ type VkDeviceQueueCreateInfo struct {
 	PQueuePriorities []float32
 }
 
+// VkPhysicalDeviceFeatures is the pure-Go input for the generated EncodeVkPhysicalDeviceFeatures
+// encoder (a plain nested-by-value Vulkan struct, no sType).
+type VkPhysicalDeviceFeatures struct {
+	RobustBufferAccess                      bool
+	FullDrawIndexUint32                     bool
+	ImageCubeArray                          bool
+	IndependentBlend                        bool
+	GeometryShader                          bool
+	TessellationShader                      bool
+	SampleRateShading                       bool
+	DualSrcBlend                            bool
+	LogicOp                                 bool
+	MultiDrawIndirect                       bool
+	DrawIndirectFirstInstance               bool
+	DepthClamp                              bool
+	DepthBiasClamp                          bool
+	FillModeNonSolid                        bool
+	DepthBounds                             bool
+	WideLines                               bool
+	LargePoints                             bool
+	AlphaToOne                              bool
+	MultiViewport                           bool
+	SamplerAnisotropy                       bool
+	TextureCompressionETC2                  bool
+	TextureCompressionASTC_LDR              bool
+	TextureCompressionBC                    bool
+	OcclusionQueryPrecise                   bool
+	PipelineStatisticsQuery                 bool
+	VertexPipelineStoresAndAtomics          bool
+	FragmentStoresAndAtomics                bool
+	ShaderTessellationAndGeometryPointSize  bool
+	ShaderImageGatherExtended               bool
+	ShaderStorageImageExtendedFormats       bool
+	ShaderStorageImageMultisample           bool
+	ShaderStorageImageReadWithoutFormat     bool
+	ShaderStorageImageWriteWithoutFormat    bool
+	ShaderUniformBufferArrayDynamicIndexing bool
+	ShaderSampledImageArrayDynamicIndexing  bool
+	ShaderStorageBufferArrayDynamicIndexing bool
+	ShaderStorageImageArrayDynamicIndexing  bool
+	ShaderClipDistance                      bool
+	ShaderCullDistance                      bool
+	ShaderFloat64                           bool
+	ShaderInt64                             bool
+	ShaderInt16                             bool
+	ShaderResourceResidency                 bool
+	ShaderResourceMinLod                    bool
+	SparseBinding                           bool
+	SparseResidencyBuffer                   bool
+	SparseResidencyImage2D                  bool
+	SparseResidencyImage3D                  bool
+	SparseResidency2Samples                 bool
+	SparseResidency4Samples                 bool
+	SparseResidency8Samples                 bool
+	SparseResidency16Samples                bool
+	SparseResidencyAliased                  bool
+	VariableMultisampleRate                 bool
+	InheritedQueries                        bool
+}
+
 // VkDeviceCreateInfo is the pure-Go input for the generated EncodeVkDeviceCreateInfo
 // encoder. sType and pNext are not fields: sType is fixed by the
 // struct identity and pNext is NULL (no extension chain emitted).
@@ -51,6 +111,7 @@ type VkDeviceCreateInfo struct {
 	PpEnabledLayerNames     []string
 	EnabledExtensionCount   uint32
 	PpEnabledExtensionNames []string
+	PEnabledFeatures        *VkPhysicalDeviceFeatures
 }
 
 // VkExtent3D is the pure-Go input for the generated EncodeVkExtent3D
@@ -353,6 +414,66 @@ func EncodeVkDeviceQueueCreateInfo(enc *vncs.Encoder, v *VkDeviceQueueCreateInfo
 	}
 }
 
+// EncodeVkPhysicalDeviceFeatures encodes a VkPhysicalDeviceFeatures onto enc, following Mesa
+// vn_encode_VkPhysicalDeviceFeatures: members in declaration order (no sType/pNext).
+func EncodeVkPhysicalDeviceFeatures(enc *vncs.Encoder, v *VkPhysicalDeviceFeatures) {
+	enc.EncodeBool32(v.RobustBufferAccess)
+	enc.EncodeBool32(v.FullDrawIndexUint32)
+	enc.EncodeBool32(v.ImageCubeArray)
+	enc.EncodeBool32(v.IndependentBlend)
+	enc.EncodeBool32(v.GeometryShader)
+	enc.EncodeBool32(v.TessellationShader)
+	enc.EncodeBool32(v.SampleRateShading)
+	enc.EncodeBool32(v.DualSrcBlend)
+	enc.EncodeBool32(v.LogicOp)
+	enc.EncodeBool32(v.MultiDrawIndirect)
+	enc.EncodeBool32(v.DrawIndirectFirstInstance)
+	enc.EncodeBool32(v.DepthClamp)
+	enc.EncodeBool32(v.DepthBiasClamp)
+	enc.EncodeBool32(v.FillModeNonSolid)
+	enc.EncodeBool32(v.DepthBounds)
+	enc.EncodeBool32(v.WideLines)
+	enc.EncodeBool32(v.LargePoints)
+	enc.EncodeBool32(v.AlphaToOne)
+	enc.EncodeBool32(v.MultiViewport)
+	enc.EncodeBool32(v.SamplerAnisotropy)
+	enc.EncodeBool32(v.TextureCompressionETC2)
+	enc.EncodeBool32(v.TextureCompressionASTC_LDR)
+	enc.EncodeBool32(v.TextureCompressionBC)
+	enc.EncodeBool32(v.OcclusionQueryPrecise)
+	enc.EncodeBool32(v.PipelineStatisticsQuery)
+	enc.EncodeBool32(v.VertexPipelineStoresAndAtomics)
+	enc.EncodeBool32(v.FragmentStoresAndAtomics)
+	enc.EncodeBool32(v.ShaderTessellationAndGeometryPointSize)
+	enc.EncodeBool32(v.ShaderImageGatherExtended)
+	enc.EncodeBool32(v.ShaderStorageImageExtendedFormats)
+	enc.EncodeBool32(v.ShaderStorageImageMultisample)
+	enc.EncodeBool32(v.ShaderStorageImageReadWithoutFormat)
+	enc.EncodeBool32(v.ShaderStorageImageWriteWithoutFormat)
+	enc.EncodeBool32(v.ShaderUniformBufferArrayDynamicIndexing)
+	enc.EncodeBool32(v.ShaderSampledImageArrayDynamicIndexing)
+	enc.EncodeBool32(v.ShaderStorageBufferArrayDynamicIndexing)
+	enc.EncodeBool32(v.ShaderStorageImageArrayDynamicIndexing)
+	enc.EncodeBool32(v.ShaderClipDistance)
+	enc.EncodeBool32(v.ShaderCullDistance)
+	enc.EncodeBool32(v.ShaderFloat64)
+	enc.EncodeBool32(v.ShaderInt64)
+	enc.EncodeBool32(v.ShaderInt16)
+	enc.EncodeBool32(v.ShaderResourceResidency)
+	enc.EncodeBool32(v.ShaderResourceMinLod)
+	enc.EncodeBool32(v.SparseBinding)
+	enc.EncodeBool32(v.SparseResidencyBuffer)
+	enc.EncodeBool32(v.SparseResidencyImage2D)
+	enc.EncodeBool32(v.SparseResidencyImage3D)
+	enc.EncodeBool32(v.SparseResidency2Samples)
+	enc.EncodeBool32(v.SparseResidency4Samples)
+	enc.EncodeBool32(v.SparseResidency8Samples)
+	enc.EncodeBool32(v.SparseResidency16Samples)
+	enc.EncodeBool32(v.SparseResidencyAliased)
+	enc.EncodeBool32(v.VariableMultisampleRate)
+	enc.EncodeBool32(v.InheritedQueries)
+}
+
 // EncodeVkDeviceCreateInfo encodes a VkDeviceCreateInfo onto enc, following Mesa
 // vn_encode_VkDeviceCreateInfo: sType (int32) + pNext (simple_pointer NULL)
 // + self members in declaration order.
@@ -386,6 +507,9 @@ func EncodeVkDeviceCreateInfo(enc *vncs.Encoder, v *VkDeviceCreateInfo) {
 		}
 	} else {
 		enc.EncodeArraySize(0)
+	}
+	if enc.EncodeSimplePointer(v.PEnabledFeatures != nil) {
+		EncodeVkPhysicalDeviceFeatures(enc, v.PEnabledFeatures)
 	}
 }
 

@@ -77,85 +77,23 @@ func EncodeGetPhysicalDeviceQueueFamilyProperties(cmdFlags uint32, physDev uint6
 	})
 }
 
+// EncodeCreateDevice wraps the generated proof.Encode_vkCreateDevice. The
+// generated EncodeVkDeviceCreateInfo now emits the struct's trailing optional
+// member
+//
+//	if (vn_encode_simple_pointer(enc, val->pEnabledFeatures))
+//	    vn_encode_VkPhysicalDeviceFeatures(enc, val->pEnabledFeatures);
+//
+// (Mesa vn_encode_VkDeviceCreateInfo_self, vn_protocol_driver_device.h), so the
+// former clearcs-side workaround (encodeCreateDeviceFixed /
+// encodeVkDeviceCreateInfoFixed, which re-encoded the command to append the
+// missing simple_pointer) is gone: this is now a bare call into the audited
+// generated encoder, byte-identical to the old workaround output. Omitting that
+// trailing simple_pointer left the host decoder peeking 8 bytes not on the wire
+// ("vkr: failed to peek 8 bytes" -> "vkCreateDevice resulted in CS error",
+// proven live against a real virgl_test_server --venus host).
 func EncodeCreateDevice(cmdFlags uint32, physDev uint64, ci *VkDeviceCreateInfo, pDevice uint64) []byte {
-	return enc(func(e *vncs.Encoder) { encodeCreateDeviceFixed(e, cmdFlags, physDev, ci, pDevice) })
-}
-
-// encodeCreateDeviceFixed wraps the generated proof.Encode_vkCreateDevice and
-// repairs a generator omission proven live against a real lavapipe vkr: the
-// generated EncodeVkDeviceCreateInfo stops after ppEnabledExtensionNames and
-// never emits the struct's trailing optional member
-//
-//	if (vn_encode_simple_pointer(enc, val->pEnabledFeatures)) ...
-//
-// (Mesa vn_encode_VkDeviceCreateInfo_self, vn_protocol_driver_device.h). With
-// it missing, the host decoder peeks an 8-byte simple_pointer that is not on
-// the wire and fails the whole command ("vkr: failed to peek 8 bytes" ->
-// "vkCreateDevice resulted in CS error"). We always pass pEnabledFeatures=NULL,
-// so the fix is a single trailing simple_pointer(0) (8-byte LE zero) appended
-// after the generated command stream. proof.Encode_vkCreateDevice emits, after
-// the VkDeviceCreateInfo, simple_pointer(pAllocator=0) and
-// simple_pointer(pDevice)+handle; the pEnabledFeatures slot belongs INSIDE the
-// VkDeviceCreateInfo, before those — so we cannot simply append. Instead we
-// re-encode the command here with the corrected struct body.
-//
-// TODO(venus generator): emit the trailing optional pEnabledFeatures
-// simple_pointer in EncodeVkDeviceCreateInfo so this wrapper can collapse to a
-// bare proof.Encode_vkCreateDevice call.
-func encodeCreateDeviceFixed(e *vncs.Encoder, cmdFlags uint32, physDev uint64, ci *VkDeviceCreateInfo, pDevice uint64) {
-	// vn_encode_vkCreateDevice framing (vn_protocol_driver_device.h):
-	//   i32 cmd_type=11, u32 cmd_flags, handle physicalDevice,
-	//   simple_pointer(pCreateInfo)+VkDeviceCreateInfo,
-	//   simple_pointer(pAllocator=0),
-	//   simple_pointer(pDevice)+handle.
-	e.EncodeInt32(11) // VK_COMMAND_TYPE_vkCreateDevice_EXT
-	e.EncodeFlags(cmdFlags)
-	e.EncodeHandle(physDev)
-	if e.EncodeSimplePointer(ci != nil) {
-		encodeVkDeviceCreateInfoFixed(e, ci)
-	}
-	e.EncodeSimplePointer(false) // pAllocator = NULL
-	if e.EncodeSimplePointer(pDevice != 0) {
-		e.EncodeHandle(pDevice)
-	}
-}
-
-// encodeVkDeviceCreateInfoFixed mirrors proof.EncodeVkDeviceCreateInfo but adds
-// the trailing pEnabledFeatures simple_pointer(NULL) the generator omits (see
-// encodeCreateDeviceFixed). Every other field is byte-identical to the
-// generated, byte-verified encoder.
-func encodeVkDeviceCreateInfoFixed(e *vncs.Encoder, v *VkDeviceCreateInfo) {
-	e.EncodeInt32(3)             // sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO
-	e.EncodeSimplePointer(false) // pNext = NULL
-	e.EncodeFlags(v.Flags)
-	e.EncodeUint32(v.QueueCreateInfoCount)
-	if len(v.PQueueCreateInfos) != 0 {
-		e.EncodeArraySize(uint64(len(v.PQueueCreateInfos)))
-		for i := range v.PQueueCreateInfos {
-			proof.EncodeVkDeviceQueueCreateInfo(e, &v.PQueueCreateInfos[i])
-		}
-	} else {
-		e.EncodeArraySize(0)
-	}
-	e.EncodeUint32(v.EnabledLayerCount)
-	if len(v.PpEnabledLayerNames) != 0 {
-		e.EncodeArraySize(uint64(len(v.PpEnabledLayerNames)))
-		for _, s := range v.PpEnabledLayerNames {
-			e.EncodeString(s)
-		}
-	} else {
-		e.EncodeArraySize(0)
-	}
-	e.EncodeUint32(v.EnabledExtensionCount)
-	if len(v.PpEnabledExtensionNames) != 0 {
-		e.EncodeArraySize(uint64(len(v.PpEnabledExtensionNames)))
-		for _, s := range v.PpEnabledExtensionNames {
-			e.EncodeString(s)
-		}
-	} else {
-		e.EncodeArraySize(0)
-	}
-	e.EncodeSimplePointer(false) // pEnabledFeatures = NULL (the omitted member)
+	return enc(func(e *vncs.Encoder) { proof.Encode_vkCreateDevice(e, cmdFlags, physDev, ci, pDevice) })
 }
 
 func EncodeGetDeviceQueue(cmdFlags uint32, device uint64, qfi, queueIndex uint32, pQueue uint64) []byte {

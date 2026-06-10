@@ -29,6 +29,7 @@ var (
 	proofStructs = []string{
 		"VkInstanceCreateInfo",
 		"VkDeviceCreateInfo",
+		"VkPhysicalDeviceFeatures",
 		"VkImageCreateInfo",
 		"VkMemoryAllocateInfo",
 		"VkCommandPoolCreateInfo",
