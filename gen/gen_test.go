@@ -82,7 +82,7 @@ func TestStructNamesDeterministic(t *testing.T) {
 	if len(names) == 0 || names[0] != "VkExtent3D" {
 		t.Errorf("StructNames order: %v", names)
 	}
-	if sorted := SortedStructNames(reg); sorted[0] != "VkApplicationInfo" || sorted[1] != "VkClearColorValue" {
+	if sorted := SortedStructNames(reg); sorted[0] != "VkApplicationInfo" || sorted[1] != "VkBufferMemoryBarrier" {
 		t.Errorf("SortedStructNames: %v", sorted)
 	}
 }

@@ -26,6 +26,26 @@ type Emitter struct {
 	// replies is the subset of commands for which a Decode_<cmd>_reply is
 	// also emitted (commands whose reply carries a created handle).
 	replies []string
+	// countArrayReplies is the subset of commands for which a count+array
+	// reply decoder is emitted (a uint32 out-count + a counted handle array,
+	// e.g. vkEnumeratePhysicalDevices).
+	countArrayReplies []string
+	// decodeStructs is the set of returned-only structs for which a full
+	// Decode<Struct> is emitted (e.g. VkMemoryRequirements). Their nested
+	// structs are pulled in transitively, same as the encode side.
+	decodeStructs []string
+	// pNextChains is the set of sType structs whose encoder emits a real
+	// pNext extension chain (EncodePNextChain over a PNext input field)
+	// instead of the always-NULL simple_pointer. Membership is looked up via
+	// pNextChainSet.
+	pNextChains   []string
+	pNextChainSet map[string]bool
+	// pNextNodes is the set of sType structs that appear as pNext extension
+	// nodes: for each, a self-only encoder (Encode<Struct>Self) and a
+	// PNextNode constructor (<Struct>Node) are emitted so callers can build a
+	// chain. Looked up via pNextNodeSet.
+	pNextNodes   []string
+	pNextNodeSet map[string]bool
 }
 
 // NewEmitter builds an Emitter over reg for the named structs and commands.
@@ -38,6 +58,55 @@ func NewEmitter(reg *Registry, structs, commands []string) *Emitter {
 // command set passed to NewEmitter.
 func (e *Emitter) WithReplies(replies []string) *Emitter {
 	e.replies = replies
+	return e
+}
+
+// WithCountArrayReplies sets the commands for which a count+array reply
+// decoder is emitted (the uint32-out-count + counted-handle-array reply shape,
+// e.g. vkEnumeratePhysicalDevices). Each name must also appear in the command
+// set passed to NewEmitter.
+func (e *Emitter) WithCountArrayReplies(cmds []string) *Emitter {
+	e.countArrayReplies = cmds
+	return e
+}
+
+// WithDecodeStructs sets the returned-only structs for which a full
+// Decode<Struct> is emitted. Nested structs they reference are pulled in
+// transitively and decoders emitted for them too.
+func (e *Emitter) WithDecodeStructs(structs []string) *Emitter {
+	e.decodeStructs = structs
+	return e
+}
+
+// WithPNextChains marks the sType structs whose encoder emits a real pNext
+// extension chain: the input struct gains a `PNext []vncs.PNextNode` field and
+// the encoder calls EncodePNextChain(v.PNext) where the always-NULL form would
+// have called EncodeSimplePointer(false). Each name must be (or be pulled in
+// as) an emitted struct.
+func (e *Emitter) WithPNextChains(structs []string) *Emitter {
+	e.pNextChains = structs
+	e.pNextChainSet = map[string]bool{}
+	for _, s := range structs {
+		e.pNextChainSet[s] = true
+	}
+	return e
+}
+
+// hasPNextChain reports whether struct name emits a real pNext chain.
+func (e *Emitter) hasPNextChain(name string) bool {
+	return e.pNextChainSet[name]
+}
+
+// WithPNextNodes marks the sType structs that appear as pNext extension nodes.
+// For each, a self-only encoder (Encode<Struct>Self, the node's members in
+// declaration order, no sType/pNext) and a PNextNode constructor
+// (<Struct>Node) are emitted so a caller can assemble a chain.
+func (e *Emitter) WithPNextNodes(structs []string) *Emitter {
+	e.pNextNodes = structs
+	e.pNextNodeSet = map[string]bool{}
+	for _, s := range structs {
+		e.pNextNodeSet[s] = true
+	}
 	return e
 }
 
@@ -86,6 +155,12 @@ func goTypeOf(reg *Registry, m *Member) string {
 		if reg != nil && reg.Structs[m.Type] != nil {
 			return "[]" + m.Type
 		}
+		if reg != nil && reg.Handles[m.Type] {
+			return "[]uint64" // counted handle array (e.g. pWaitSemaphores)
+		}
+		if isFlags(m.Type) {
+			return "[]uint32" // counted VkFlags array (e.g. pWaitDstStageMask)
+		}
 	}
 	switch m.Type {
 	case "uint32_t":
@@ -94,6 +169,8 @@ func goTypeOf(reg *Registry, m *Member) string {
 		return "int32"
 	case "uint64_t":
 		return "uint64"
+	case "size_t":
+		return "uint64" // size_t is serialised as uint64 (vn_encode/decode_size_t)
 	case "float":
 		return "float32"
 	case "VkBool32":
@@ -170,16 +247,50 @@ func (e *Emitter) Generate(pkg string) ([]byte, error) {
 			return nil, fmt.Errorf("gen: reply command %q not found in registry", name)
 		}
 	}
+	for _, name := range e.countArrayReplies {
+		if e.reg.Commands[name] == nil {
+			return nil, fmt.Errorf("gen: count-array reply command %q not found in registry", name)
+		}
+	}
+	for _, name := range e.decodeStructs {
+		if e.reg.Structs[name] == nil {
+			return nil, fmt.Errorf("gen: decode struct %q not found in registry", name)
+		}
+	}
+	for _, name := range e.pNextNodes {
+		if e.reg.Structs[name] == nil {
+			return nil, fmt.Errorf("gen: pNext node struct %q not found in registry", name)
+		}
+	}
 
 	// Collect the nested structs the requested structs/commands reference so
 	// we can emit input types for them too (deterministic, deduplicated).
 	needed := e.neededStructs()
+	// Decode-only structs (and their nested deps) that aren't already covered
+	// by an encoder need their input type emitted too.
+	decodeNeeded := e.neededDecodeStructs()
+	seen := map[string]bool{}
+	for _, name := range needed {
+		seen[name] = true
+	}
 
 	// needed only contains structs proven to exist (neededStructs filters on
 	// reg.Structs != nil), and the requested commands were validated above,
 	// so the lookups below are total.
 	for _, name := range needed {
 		e.emitInputStruct(&b, e.reg.Structs[name])
+	}
+	for _, name := range decodeNeeded {
+		if !seen[name] {
+			e.emitInputStruct(&b, e.reg.Structs[name])
+			seen[name] = true
+		}
+	}
+	for _, name := range e.pNextNodes {
+		if !seen[name] {
+			e.emitInputStruct(&b, e.reg.Structs[name])
+			seen[name] = true
+		}
 	}
 	for _, name := range needed {
 		if err := e.emitStructEncoder(&b, e.reg.Structs[name]); err != nil {
@@ -196,7 +307,88 @@ func (e *Emitter) Generate(pkg string) ([]byte, error) {
 			return nil, err
 		}
 	}
+	for _, name := range e.countArrayReplies {
+		if err := e.emitCountArrayReplyDecoder(&b, e.reg.Commands[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range decodeNeeded {
+		if err := e.emitStructDecoder(&b, e.reg.Structs[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range e.pNextNodes {
+		if err := e.emitPNextNode(&b, e.reg.Structs[name]); err != nil {
+			return nil, err
+		}
+	}
 	return b.Bytes(), nil
+}
+
+// emitPNextNode emits, for a pNext extension-node struct, a self-only encoder
+// Encode<Struct>Self (the node's members in declaration order, skipping
+// sType/pNext — the analogue of Mesa's vn_encode_<Struct>_self) and a
+// PNextNode constructor <Struct>Node(v) that pairs the node's sType with that
+// self encoder. Callers append <Struct>Node(...) values to a parent's PNext
+// field; EncodePNextChain then encodes sp(1)+sType+recurse+self per node.
+func (e *Emitter) emitPNextNode(b *bytes.Buffer, s *Struct) error {
+	if !hasSType(s) {
+		return fmt.Errorf("gen: pNext node %s has no sType (not an extension struct)", s.Name)
+	}
+	sTypeToken := ""
+	for _, m := range s.Members {
+		if m.IsSType {
+			sTypeToken = m.STypeValue
+		}
+	}
+	val := e.reg.EnumValues[sTypeToken]
+	if val == "" {
+		return fmt.Errorf("gen: no enum value for %q", sTypeToken)
+	}
+
+	fmt.Fprintf(b, "// Encode%sSelf encodes just the self members of a %s\n", s.Name, s.Name)
+	fmt.Fprintf(b, "// (no sType/pNext), per Mesa vn_encode_%s_self — used as a pNext node.\n", s.Name)
+	fmt.Fprintf(b, "func Encode%sSelf(enc *vncs.Encoder, v *%s) {\n", s.Name, s.Name)
+	for _, m := range s.Members {
+		if m.IsSType || m.IsPNext {
+			continue
+		}
+		if err := e.emitMember(b, "v", m); err != nil {
+			return err
+		}
+	}
+	b.WriteString("}\n\n")
+
+	fmt.Fprintf(b, "// %sNode wraps v as a pNext chain node (sType %s = %s).\n", s.Name, sTypeToken, val)
+	fmt.Fprintf(b, "func %sNode(v *%s) vncs.PNextNode {\n", s.Name, s.Name)
+	fmt.Fprintf(b, "\treturn vncs.PNextNode{SType: %s, EncodeSelf: func(enc *vncs.Encoder) { Encode%sSelf(enc, v) }}\n", val, s.Name)
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// neededDecodeStructs returns the transitive set of structs to emit decoders
+// for: the requested decode structs plus any nested struct types they
+// reference, referenced-before-referencing.
+func (e *Emitter) neededDecodeStructs() []string {
+	want := map[string]bool{}
+	var order []string
+	var visit func(name string)
+	visit = func(name string) {
+		if want[name] || e.reg.Structs[name] == nil {
+			return
+		}
+		want[name] = true
+		for _, m := range e.reg.Structs[name].Members {
+			if e.reg.Structs[m.Type] != nil {
+				visit(m.Type)
+			}
+		}
+		order = append(order, name)
+	}
+	for _, name := range e.decodeStructs {
+		visit(name)
+	}
+	return order
 }
 
 // neededStructs returns the transitive set of structs to emit: the requested
@@ -256,15 +448,24 @@ func (e *Emitter) emitInputStruct(b *bytes.Buffer, s *Struct) {
 		b.WriteString("}\n\n")
 		return
 	}
+	chain := e.hasPNextChain(s.Name)
 	if hasSType(s) {
 		fmt.Fprintf(b, "// %s is the pure-Go input for the generated Encode%s\n", s.Name, s.Name)
-		fmt.Fprintf(b, "// encoder. sType and pNext are not fields: sType is fixed by the\n")
-		fmt.Fprintf(b, "// struct identity and pNext is NULL (no extension chain emitted).\n")
+		if chain {
+			fmt.Fprintf(b, "// encoder. sType is fixed by the struct identity; PNext is the\n")
+			fmt.Fprintf(b, "// (possibly empty) extension chain, encoded via EncodePNextChain.\n")
+		} else {
+			fmt.Fprintf(b, "// encoder. sType and pNext are not fields: sType is fixed by the\n")
+			fmt.Fprintf(b, "// struct identity and pNext is NULL (no extension chain emitted).\n")
+		}
 	} else {
 		fmt.Fprintf(b, "// %s is the pure-Go input for the generated Encode%s\n", s.Name, s.Name)
 		fmt.Fprintf(b, "// encoder (a plain nested-by-value Vulkan struct, no sType).\n")
 	}
 	fmt.Fprintf(b, "type %s struct {\n", s.Name)
+	if chain {
+		fmt.Fprintf(b, "\tPNext []vncs.PNextNode\n")
+	}
 	for _, m := range s.Members {
 		if m.IsSType || m.IsPNext {
 			continue
@@ -305,12 +506,22 @@ func (e *Emitter) emitStructEncoder(b *bytes.Buffer, s *Struct) error {
 		return fmt.Errorf("gen: no enum value for %q", sTypeToken)
 	}
 
+	chain := e.hasPNextChain(s.Name)
 	fmt.Fprintf(b, "// Encode%s encodes a %s onto enc, following Mesa\n", s.Name, s.Name)
-	fmt.Fprintf(b, "// vn_encode_%s: sType (int32) + pNext (simple_pointer NULL)\n", s.Name)
-	fmt.Fprintf(b, "// + self members in declaration order.\n")
+	if chain {
+		fmt.Fprintf(b, "// vn_encode_%s: sType (int32) + the pNext chain (vn_encode_%s_pnext)\n", s.Name, s.Name)
+		fmt.Fprintf(b, "// + self members in declaration order.\n")
+	} else {
+		fmt.Fprintf(b, "// vn_encode_%s: sType (int32) + pNext (simple_pointer NULL)\n", s.Name)
+		fmt.Fprintf(b, "// + self members in declaration order.\n")
+	}
 	fmt.Fprintf(b, "func Encode%s(enc *vncs.Encoder, v *%s) {\n", s.Name, s.Name)
 	fmt.Fprintf(b, "\tenc.EncodeInt32(%s) // sType = %s\n", val, sTypeToken)
-	fmt.Fprintf(b, "\tenc.EncodeSimplePointer(false) // pNext = NULL\n")
+	if chain {
+		fmt.Fprintf(b, "\tenc.EncodePNextChain(v.PNext) // pNext extension chain\n")
+	} else {
+		fmt.Fprintf(b, "\tenc.EncodeSimplePointer(false) // pNext = NULL\n")
+	}
 	for _, m := range s.Members {
 		if m.IsSType || m.IsPNext {
 			continue
@@ -414,6 +625,32 @@ func (e *Emitter) emitMember(b *bytes.Buffer, recv string, m *Member) error {
 		fmt.Fprintf(b, "\tif len(%s) != 0 {\n", field)
 		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(uint64(len(%s)))\n", field)
 		fmt.Fprintf(b, "\t\tenc.%s(%s)\n", scalarArrayPrim(m.Type), field)
+		fmt.Fprintf(b, "\t} else {\n")
+		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(0)\n")
+		fmt.Fprintf(b, "\t}\n")
+		return nil
+	case m.Pointer && m.Len != "" && e.reg.Handles[m.Type]:
+		// Counted pointer to a handle array inside a struct (e.g.
+		// VkSubmitInfo.pWaitSemaphores/pCommandBuffers/pSignalSemaphores).
+		// Mesa: if (p) { array_size(count); for { handle } } else array_size(0).
+		fmt.Fprintf(b, "\tif len(%s) != 0 {\n", field)
+		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(uint64(len(%s)))\n", field)
+		fmt.Fprintf(b, "\t\tfor i := range %s {\n", field)
+		fmt.Fprintf(b, "\t\t\tenc.EncodeHandle(%s[i])\n", field)
+		fmt.Fprintf(b, "\t\t}\n")
+		fmt.Fprintf(b, "\t} else {\n")
+		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(0)\n")
+		fmt.Fprintf(b, "\t}\n")
+		return nil
+	case m.Pointer && m.Len != "" && isFlags(m.Type):
+		// Counted pointer to a VkFlags array inside a struct (e.g.
+		// VkSubmitInfo.pWaitDstStageMask, whose len is waitSemaphoreCount).
+		// Mesa: if (p) { array_size(count); for { VkFlags } } else array_size(0).
+		fmt.Fprintf(b, "\tif len(%s) != 0 {\n", field)
+		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(uint64(len(%s)))\n", field)
+		fmt.Fprintf(b, "\t\tfor i := range %s {\n", field)
+		fmt.Fprintf(b, "\t\t\tenc.EncodeFlags(%s[i])\n", field)
+		fmt.Fprintf(b, "\t\t}\n")
 		fmt.Fprintf(b, "\t} else {\n")
 		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(0)\n")
 		fmt.Fprintf(b, "\t}\n")
@@ -725,6 +962,196 @@ func (e *Emitter) emitCommandReplyDecoder(b *bytes.Buffer, c *Command) error {
 	fmt.Fprintf(b, "\t}\n")
 	fmt.Fprintf(b, "\treturn cmdType, result, %s, ok\n", out)
 	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitCountArrayReplyDecoder emits a Decode_<cmd>_reply for the
+// "count + handle array" reply shape, transcribed from Mesa's
+// vn_decode_vkEnumeratePhysicalDevices_reply (vn_protocol_driver_device.h):
+//
+//	vn_decode_VkCommandTypeEXT(dec, &command_type);
+//	assert(command_type == VK_COMMAND_TYPE_<cmd>_EXT);
+//	vn_decode_VkResult(dec, &ret);
+//	// skip the leading in-param(s) (e.g. instance)
+//	if (vn_decode_simple_pointer(dec)) vn_decode_uint32_t(dec, pCount);
+//	else pCount = NULL;
+//	if (vn_peek_array_size(dec)) {
+//	    const uint32_t n = vn_decode_array_size(dec, *pCount);
+//	    for (i < n) vn_decode_VkHandle(dec, &pArray[i]);
+//	} else {
+//	    vn_decode_array_size_unchecked(dec);   // consume the 0
+//	    pArray = NULL;
+//	}
+//	return ret;
+//
+// The out-count is the pointer-to-uint32 param; the out-array is the counted
+// pointer-to-handle param (its len= names the count param). countOK is the
+// count's simple_pointer flag; the returned handle slice is nil when the
+// peeked array_size is 0.
+func (e *Emitter) emitCountArrayReplyDecoder(b *bytes.Buffer, c *Command) error {
+	cmdToken := "VK_COMMAND_TYPE_" + c.Name + "_EXT"
+	val, ok := e.commandTypeValue(c.Name)
+	if !ok {
+		return fmt.Errorf("gen: no VkCommandTypeEXT value for %q", c.Name)
+	}
+	var countParam, arrayParam *Param
+	for _, p := range c.Params {
+		switch {
+		case p.Pointer && p.Type == "uint32_t":
+			countParam = p
+		case p.Pointer && p.Len != "" && e.reg.Handles[p.Type]:
+			arrayParam = p
+		}
+	}
+	if countParam == nil || arrayParam == nil {
+		return fmt.Errorf("gen: command %q is not a count+array reply shape (count=%v array=%v)", c.Name, countParam, arrayParam)
+	}
+	countName := lowerName(countParam.Name)
+	arrayName := lowerName(arrayParam.Name)
+
+	fmt.Fprintf(b, "// %sReplyCmdType is the VkCommandTypeEXT the %s reply echoes\n", exportName(c.Name), c.Name)
+	fmt.Fprintf(b, "// (%s).\n", cmdToken)
+	fmt.Fprintf(b, "const %sReplyCmdType int32 = %s\n\n", exportName(c.Name), val)
+	fmt.Fprintf(b, "// Decode_%s_reply decodes the %s reply, per Mesa\n", c.Name, c.Name)
+	fmt.Fprintf(b, "// vn_decode_%s_reply: command-type echo + VkResult +\n", c.Name)
+	fmt.Fprintf(b, "// simple_pointer(%s)+uint32 + peeked counted %s handle array.\n", countParam.Name, arrayParam.Name)
+	fmt.Fprintf(b, "// countOK is the count's simple_pointer flag; %s is nil when the\n", arrayName)
+	fmt.Fprintf(b, "// peeked array_size is 0 (the array_size(0) is still consumed, matching\n")
+	fmt.Fprintf(b, "// vn_decode_array_size_unchecked).\n")
+	fmt.Fprintf(b, "func Decode_%s_reply(dec *vncs.Decoder) (cmdType int32, result int32, %s uint32, countOK bool, %s []uint64) {\n", c.Name, countName, arrayName)
+	fmt.Fprintf(b, "\tcmdType = dec.DecodeInt32() // echoed %s\n", cmdToken)
+	fmt.Fprintf(b, "\tresult = dec.DecodeResult()\n")
+	fmt.Fprintf(b, "\tif dec.DecodeSimplePointer() {\n")
+	fmt.Fprintf(b, "\t\t%s = dec.DecodeUint32()\n", countName)
+	fmt.Fprintf(b, "\t\tcountOK = true\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\tif dec.PeekArraySize() != 0 {\n")
+	fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(uint64(%s))\n", countName)
+	fmt.Fprintf(b, "\t\t%s = make([]uint64, n)\n", arrayName)
+	fmt.Fprintf(b, "\t\tfor i := range %s {\n", arrayName)
+	fmt.Fprintf(b, "\t\t\t%s[i] = dec.DecodeHandle()\n", arrayName)
+	fmt.Fprintf(b, "\t\t}\n")
+	fmt.Fprintf(b, "\t} else {\n")
+	fmt.Fprintf(b, "\t\tdec.DecodeArraySizeUnchecked() // consume the array_size(0)\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\treturn cmdType, result, %s, countOK, %s\n", countName, arrayName)
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitStructDecoder emits a Decode<Struct> that mirrors Mesa's
+// vn_decode_<Struct>: for a returned-only (no-sType) struct it reads each
+// member in declaration order; for an sType struct it reads sType + the pNext
+// presence flag first. The returned-struct path (VkMemoryRequirements,
+// VkPhysicalDeviceProperties) decodes the FULL struct (Mesa's _partial form is
+// the request-side encode skeleton, not the reply decode).
+func (e *Emitter) emitStructDecoder(b *bytes.Buffer, s *Struct) error {
+	if e.reg.Unions[s.Name] {
+		return fmt.Errorf("gen: union %s has no generated decoder (returned unions are out of scope)", s.Name)
+	}
+	fmt.Fprintf(b, "// Decode%s decodes a %s from dec, following Mesa\n", s.Name, s.Name)
+	fmt.Fprintf(b, "// vn_decode_%s: members in declaration order.\n", s.Name)
+	fmt.Fprintf(b, "func Decode%s(dec *vncs.Decoder, v *%s) {\n", s.Name, s.Name)
+	for _, m := range s.Members {
+		if m.IsSType || m.IsPNext {
+			continue
+		}
+		if err := e.emitMemberDecode(b, "v", m); err != nil {
+			return err
+		}
+	}
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitMemberDecode emits the decode call(s) for one struct member, the inverse
+// of emitMember, choosing the vncs decode primitive from the member's type and
+// attributes exactly as Mesa's vn_decode_<Struct> does.
+func (e *Emitter) emitMemberDecode(b *bytes.Buffer, recv string, m *Member) error {
+	if m.IsSType || m.IsPNext {
+		return nil
+	}
+	field := recv + "." + exportName(m.Name)
+	if m.FixedArrayLen != "" {
+		return e.emitFixedArrayMemberDecode(b, field, m)
+	}
+	if !m.Pointer && e.reg.Structs[m.Type] != nil { // nested struct by value
+		fmt.Fprintf(b, "\tDecode%s(dec, &%s)\n", m.Type, field)
+		return nil
+	}
+	switch {
+	case m.Type == "uint32_t":
+		fmt.Fprintf(b, "\t%s = dec.DecodeUint32()\n", field)
+	case m.Type == "int32_t":
+		fmt.Fprintf(b, "\t%s = dec.DecodeInt32()\n", field)
+	case m.Type == "uint64_t":
+		fmt.Fprintf(b, "\t%s = dec.DecodeUint64()\n", field)
+	case m.Type == "float":
+		fmt.Fprintf(b, "\t%s = dec.DecodeFloat32()\n", field)
+	case m.Type == "VkBool32":
+		fmt.Fprintf(b, "\t%s = dec.DecodeBool32()\n", field)
+	case m.Type == "VkDeviceSize" || m.Type == "VkDeviceAddress":
+		fmt.Fprintf(b, "\t%s = dec.DecodeDeviceSize()\n", field)
+	case m.Type == "size_t":
+		fmt.Fprintf(b, "\t%s = dec.DecodeSizeT()\n", field)
+	case isFlags(m.Type):
+		fmt.Fprintf(b, "\t%s = dec.DecodeFlags()\n", field)
+	case e.reg.EnumTypes[m.Type]:
+		fmt.Fprintf(b, "\t%s = dec.DecodeInt32() // enum %s\n", field, m.Type)
+	case e.reg.Handles[m.Type]:
+		fmt.Fprintf(b, "\t%s = dec.DecodeHandle() // handle %s\n", field, m.Type)
+	default:
+		return fmt.Errorf("gen: unsupported decode member %s of type %q", m.Name, m.Type)
+	}
+	return nil
+}
+
+// emitFixedArrayMemberDecode emits a fixed-size array member decode, the
+// inverse of emitFixedArrayMember: array_size(N) is decoded (bounded by N) and
+// the N-element blob/array read back. Mirrors Mesa's
+//
+//	const size_t array_size = vn_decode_array_size(dec, N);
+//	vn_decode_<T>_array(dec, val->field, array_size);
+func (e *Emitter) emitFixedArrayMemberDecode(b *bytes.Buffer, field string, m *Member) error {
+	if strings.Contains(m.FixedArrayLen, "[multidim]") {
+		return fmt.Errorf("gen: member %s is a multi-dimensional fixed array (%q), not supported", m.Name, m.FixedArrayLen)
+	}
+	n := e.fixedArrayN(m.FixedArrayLen)
+	if n == "" {
+		return fmt.Errorf("gen: member %s fixed-array length %q has no known value", m.Name, m.FixedArrayLen)
+	}
+	switch m.Type {
+	case "char":
+		// char[N]: array_size(N) bounded, then a char_array blob of N bytes
+		// surfaced as a Go string (trailing NUL bytes trimmed by the caller's
+		// reading convention — we keep the raw N bytes for byte fidelity).
+		fmt.Fprintf(b, "\t{\n")
+		fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(%s)\n", n)
+		fmt.Fprintf(b, "\t\t%s = string(dec.DecodeCharArray(int(n)))\n", field)
+		fmt.Fprintf(b, "\t}\n")
+	case "uint8_t":
+		fmt.Fprintf(b, "\t{\n")
+		fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(%s)\n", n)
+		fmt.Fprintf(b, "\t\t%s = dec.DecodeUint8Array(int(n))\n", field)
+		fmt.Fprintf(b, "\t}\n")
+	case "uint32_t":
+		fmt.Fprintf(b, "\t{\n")
+		fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(%s)\n", n)
+		fmt.Fprintf(b, "\t\tcopy(%s[:], dec.DecodeUint32Array(int(n)))\n", field)
+		fmt.Fprintf(b, "\t}\n")
+	case "int32_t":
+		fmt.Fprintf(b, "\t{\n")
+		fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(%s)\n", n)
+		fmt.Fprintf(b, "\t\tcopy(%s[:], dec.DecodeInt32Array(int(n)))\n", field)
+		fmt.Fprintf(b, "\t}\n")
+	case "float":
+		fmt.Fprintf(b, "\t{\n")
+		fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(%s)\n", n)
+		fmt.Fprintf(b, "\t\tcopy(%s[:], dec.DecodeFloat32Array(int(n)))\n", field)
+		fmt.Fprintf(b, "\t}\n")
+	default:
+		return fmt.Errorf("gen: fixed array decode of %q (member %s) not supported", m.Type, m.Name)
+	}
 	return nil
 }
 

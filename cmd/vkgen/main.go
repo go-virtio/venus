@@ -35,6 +35,8 @@ var (
 		"VkCommandBufferAllocateInfo",
 		"VkImageSubresourceRange",
 		"VkClearColorValue",
+		"VkSubmitInfo",
+		"VkImageMemoryBarrier",
 	}
 	proofCommands = []string{
 		"vkCreateInstance",
@@ -44,6 +46,8 @@ var (
 		"vkAllocateMemory",
 		"vkCreateCommandPool",
 		"vkCmdClearColorImage",
+		"vkQueueSubmit",
+		"vkCmdPipelineBarrier",
 	}
 	proofReplies = []string{
 		"vkCreateInstance",
@@ -51,6 +55,30 @@ var (
 		"vkCreateImage",
 		"vkAllocateMemory",
 		"vkCreateCommandPool",
+	}
+	// proofCountArrayReplies is the subset of commands whose reply is a
+	// uint32 out-count + a counted handle array (vkEnumeratePhysicalDevices).
+	proofCountArrayReplies = []string{
+		"vkEnumeratePhysicalDevices",
+	}
+	// proofDecodeStructs is the set of returned-only structs decoded on the
+	// reply/readback side. Nested structs are pulled in transitively.
+	proofDecodeStructs = []string{
+		"VkMemoryRequirements",
+		"VkPhysicalDeviceProperties",
+	}
+	// proofPNextChains is the set of sType structs whose encoder emits a real
+	// pNext extension chain (VkSubmitInfo / VkImageMemoryBarrier on the
+	// clear-image submit/barrier path).
+	proofPNextChains = []string{
+		"VkSubmitInfo",
+		"VkImageMemoryBarrier",
+	}
+	// proofPNextNodes is the set of extension-node structs used in a pNext
+	// chain on the submit/barrier path; each gets a self-encoder + a node
+	// constructor. VkProtectedSubmitInfo chains onto VkSubmitInfo.
+	proofPNextNodes = []string{
+		"VkProtectedSubmitInfo",
 	}
 )
 
@@ -74,7 +102,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", *xmlPath, err)
 	}
-	src, err := Generate(data, *pkg, proofStructs, proofCommands, proofReplies)
+	src, err := Generate(data, *pkg, proofStructs, proofCommands, proofReplies, proofCountArrayReplies, proofDecodeStructs, proofPNextChains, proofPNextNodes)
 	if err != nil {
 		return err
 	}
@@ -88,13 +116,21 @@ func run() error {
 // Generate parses data and emits gofmt'd Go source for the given subset.
 // Exposed (not just inlined in run) so tests can exercise the full
 // parse->emit->format pipeline without touching the filesystem. replies is
-// the subset of commands for which a reply decoder is also emitted.
-func Generate(data []byte, pkg string, structs, commands, replies []string) ([]byte, error) {
+// the subset of commands for which a single-handle reply decoder is emitted;
+// countArrayReplies is the subset with a count+handle-array reply; and
+// decodeStructs is the set of returned-only structs decoded on readback.
+func Generate(data []byte, pkg string, structs, commands, replies, countArrayReplies, decodeStructs, pNextChains, pNextNodes []string) ([]byte, error) {
 	reg, err := gen.Parse(data)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := gen.NewEmitter(reg, structs, commands).WithReplies(replies).Generate(pkg)
+	raw, err := gen.NewEmitter(reg, structs, commands).
+		WithReplies(replies).
+		WithCountArrayReplies(countArrayReplies).
+		WithDecodeStructs(decodeStructs).
+		WithPNextChains(pNextChains).
+		WithPNextNodes(pNextNodes).
+		Generate(pkg)
 	if err != nil {
 		return nil, err
 	}

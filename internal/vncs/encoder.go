@@ -285,3 +285,54 @@ func (e *Encoder) EncodeFloat32Array(vals []float32) {
 		e.EncodeFloat32(v)
 	}
 }
+
+// PNextNode is one node of a Vulkan pNext extension chain: its VkStructureType
+// (encoded as int32, the value the parent's accepted-sType switch keys on) and
+// a closure that encodes the node's "self" members (everything but sType/pNext,
+// in declaration order). Generated chain-bearing struct encoders build a
+// []PNextNode and hand it to EncodePNextChain.
+type PNextNode struct {
+	SType      int32
+	EncodeSelf func(*Encoder)
+}
+
+// EncodePNextChain mirrors Mesa's generated vn_encode_<Struct>_pnext walk
+// (e.g. vn_encode_VkSubmitInfo_pnext, vn_encode_VkImageMemoryBarrier_pnext):
+//
+//	const VkBaseInStructure *pnext = val;
+//	while (pnext) {
+//	    switch ((int32_t)pnext->sType) {
+//	    case <KNOWN_STYPE>:
+//	        vn_encode_simple_pointer(enc, pnext);            // present = 1
+//	        vn_encode_VkStructureType(enc, &pnext->sType);   // sType int32
+//	        vn_encode_<Struct>_pnext(enc, node->pNext);      // RECURSE on the rest
+//	        vn_encode_<Node>_self(enc, node);                // THEN this node's self
+//	        return;
+//	    default:
+//	        break;                                           // skip unknown sType
+//	    }
+//	    pnext = pnext->pNext;
+//	}
+//	vn_encode_simple_pointer(enc, NULL);                     // end of chain = 0
+//
+// Crucially the recursion happens BEFORE the node's self, so for a chain
+// [A, B] the wire is:
+//
+//	sp(1) sTypeA  sp(1) sTypeB  sp(0)  selfB  selfA
+//
+// i.e. the per-node presence-flag+sType prefixes nest outermost-first while
+// the self payloads unwind innermost-first. An empty chain is a single sp(0).
+// Each node in nodes is treated as a "known" sType (the caller supplies only
+// supported nodes), matching the case arm; Mesa's default (skip-unknown) arm
+// is the responsibility of the caller, which simply omits unsupported nodes.
+func (e *Encoder) EncodePNextChain(nodes []PNextNode) {
+	if len(nodes) == 0 {
+		e.EncodeSimplePointer(false) // end of chain
+		return
+	}
+	head := nodes[0]
+	e.EncodeSimplePointer(true)   // this node is present
+	e.EncodeInt32(head.SType)     // vn_encode_VkStructureType
+	e.EncodePNextChain(nodes[1:]) // recurse on the rest of the chain
+	head.EncodeSelf(e)            // then this node's self members
+}

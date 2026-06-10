@@ -165,6 +165,73 @@ func TestDecodeUnderflow(t *testing.T) {
 	}
 }
 
+// TestDecodeArraySizeUnchecked: an 8-byte LE prefix with no bound, used to
+// skip the encoded array_size(0) on the absent arm of an out-array
+// (vn_decode_array_size_unchecked).
+func TestDecodeArraySizeUnchecked(t *testing.T) {
+	d := NewDecoder([]byte{0, 0, 0, 0, 0, 0, 0, 0})
+	if got := d.DecodeArraySizeUnchecked(); got != 0 || d.Fatal() {
+		t.Fatalf("unchecked(0) got %d fatal=%v", got, d.Fatal())
+	}
+	// Large value is accepted (no max_size bound) unlike DecodeArraySize.
+	d2 := NewDecoder([]byte{0xff, 0, 0, 0, 0, 0, 0, 0})
+	if got := d2.DecodeArraySizeUnchecked(); got != 0xff || d2.Fatal() {
+		t.Fatalf("unchecked(255) got %d fatal=%v", got, d2.Fatal())
+	}
+}
+
+// TestDecodeSizeT: size_t decodes as an 8-byte LE uint64
+// (vn_decode_size_t -> vn_decode_uint64_t).
+func TestDecodeSizeT(t *testing.T) {
+	d := NewDecoder([]byte{0x40, 0, 0, 0, 0, 0, 0, 0})
+	if got := d.DecodeSizeT(); got != 0x40 {
+		t.Fatalf("size_t got %#x", got)
+	}
+}
+
+// TestDecodeUint8Array: count payload bytes consumed past a 4-byte-padded
+// span (vn_decode_uint8_t_array). 6 bytes -> (6+3)&~3 = 8 wire bytes.
+func TestDecodeUint8Array(t *testing.T) {
+	d := NewDecoder([]byte{1, 2, 3, 4, 5, 6, 0, 0, 0xaa, 0xbb, 0xcc, 0xdd})
+	if got := d.DecodeUint8Array(6); !bytes.Equal(got, []byte{1, 2, 3, 4, 5, 6}) {
+		t.Fatalf("uint8 array got % x", got)
+	}
+	if got := d.DecodeUint32(); got != 0xddccbbaa {
+		t.Fatalf("post-array dword got %#x", got)
+	}
+}
+
+// TestDecodeCharArray: a size-byte blob whose last byte is the NUL
+// terminator; a zero size is a protocol error (vn_decode_char_array).
+func TestDecodeCharArray(t *testing.T) {
+	// "hi\0" stored as char[4] -> 4 payload bytes, padded span is 4.
+	d := NewDecoder([]byte{'h', 'i', 0, 0})
+	got := d.DecodeCharArray(4)
+	if !bytes.Equal(got, []byte{'h', 'i', 0, 0}) {
+		t.Fatalf("char array got % x", got)
+	}
+	// size 0 -> fatal, nil.
+	z := NewDecoder([]byte{1, 2, 3, 4})
+	if z.DecodeCharArray(0) != nil || !z.Fatal() {
+		t.Fatal("char array size 0 should be fatal/nil")
+	}
+}
+
+// TestDecodeNumericArrays: uint32/int32/float arrays decode as count
+// contiguous dwords (vn_decode_uint32_t_array et al.).
+func TestDecodeNumericArrays(t *testing.T) {
+	d := NewDecoder([]byte{1, 0, 0, 0, 2, 0, 0, 0, 0xff, 0xff, 0xff, 0xff, 0, 0, 0x80, 0x3f})
+	if got := d.DecodeUint32Array(2); got[0] != 1 || got[1] != 2 {
+		t.Fatalf("uint32 array got %v", got)
+	}
+	if got := d.DecodeInt32Array(1); got[0] != -1 {
+		t.Fatalf("int32 array got %v", got)
+	}
+	if got := d.DecodeFloat32Array(1); got[0] != 1.0 {
+		t.Fatalf("float array got %v", got)
+	}
+}
+
 func TestDecodeReadPanicsOnUnaligned(t *testing.T) {
 	defer func() {
 		if recover() == nil {

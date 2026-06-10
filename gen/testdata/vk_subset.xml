@@ -15,6 +15,10 @@
     <type category="handle"><name>VkDeviceMemory</name></type>
     <type category="handle"><name>VkCommandPool</name></type>
     <type category="handle"><name>VkCommandBuffer</name></type>
+    <type category="handle"><name>VkQueue</name></type>
+    <type category="handle"><name>VkFence</name></type>
+    <type category="handle"><name>VkSemaphore</name></type>
+    <type category="handle"><name>VkBuffer</name></type>
 
     <!-- nested-by-value structs (no sType) -->
     <type category="struct" name="VkExtent3D">
@@ -112,6 +116,95 @@
       <member><type>VkCommandBufferLevel</type>   <name>level</name></member>
       <member><type>uint32_t</type>               <name>commandBufferCount</name></member>
     </type>
+
+    <!-- returned-only structs (no sType): decoded on the reply/readback side -->
+    <type category="struct" name="VkMemoryRequirements">
+      <member><type>VkDeviceSize</type>           <name>size</name></member>
+      <member><type>VkDeviceSize</type>           <name>alignment</name></member>
+      <member><type>uint32_t</type>               <name>memoryTypeBits</name></member>
+    </type>
+    <type category="struct" name="VkPhysicalDeviceSparseProperties">
+      <member><type>VkBool32</type>               <name>residencyStandard2DBlockShape</name></member>
+      <member><type>VkBool32</type>               <name>residencyStandard2DMultisampleBlockShape</name></member>
+      <member><type>VkBool32</type>               <name>residencyStandard3DBlockShape</name></member>
+      <member><type>VkBool32</type>               <name>residencyAlignedMipSize</name></member>
+      <member><type>VkBool32</type>               <name>residencyNonResidentStrict</name></member>
+    </type>
+    <type category="struct" name="VkPhysicalDeviceLimits">
+      <member><type>uint32_t</type>               <name>maxImageDimension1D</name></member>
+      <member><type>uint32_t</type>               <name>maxImageDimension2D</name></member>
+      <member><type>uint32_t</type>               <name>maxImageDimension3D</name></member>
+      <member><type>uint32_t</type>               <name>maxImageDimensionCube</name></member>
+      <member><type>uint32_t</type>               <name>maxImageArrayLayers</name></member>
+      <member><type>uint32_t</type>               <name>maxTexelBufferElements</name></member>
+      <member><type>VkDeviceSize</type>           <name>bufferImageGranularity</name></member>
+      <member><type>uint32_t</type>               <name>maxComputeWorkGroupCount</name>[3]</member>
+      <member><type>float</type>                  <name>maxSamplerLodBias</name></member>
+      <member><type>size_t</type>                 <name>minMemoryMapAlignment</name></member>
+      <member><type>int32_t</type>                <name>minTexelOffset</name></member>
+      <member><type>VkSampleCountFlags</type>     <name>framebufferColorSampleCounts</name></member>
+      <member><type>VkBool32</type>               <name>timestampComputeAndGraphics</name></member>
+      <member><type>float</type>                  <name>pointSizeRange</name>[2]</member>
+      <member><type>VkDeviceSize</type>           <name>nonCoherentAtomSize</name></member>
+    </type>
+    <type category="struct" name="VkPhysicalDeviceProperties">
+      <member><type>uint32_t</type>               <name>apiVersion</name></member>
+      <member><type>uint32_t</type>               <name>driverVersion</name></member>
+      <member><type>uint32_t</type>               <name>vendorID</name></member>
+      <member><type>uint32_t</type>               <name>deviceID</name></member>
+      <member><type>VkPhysicalDeviceType</type>   <name>deviceType</name></member>
+      <member><type>char</type>                   <name>deviceName</name>[<enum>VK_MAX_PHYSICAL_DEVICE_NAME_SIZE</enum>]</member>
+      <member><type>uint8_t</type>                <name>pipelineCacheUUID</name>[<enum>VK_UUID_SIZE</enum>]</member>
+      <member><type>VkPhysicalDeviceLimits</type> <name>limits</name></member>
+      <member><type>VkPhysicalDeviceSparseProperties</type> <name>sparseProperties</name></member>
+    </type>
+
+    <!-- pNext-chain-bearing structs + their accepted extension nodes -->
+    <type category="struct" name="VkProtectedSubmitInfo">
+      <member values="VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO"><type>VkStructureType</type> <name>sType</name></member>
+      <member optional="true">const <type>void</type>*     <name>pNext</name></member>
+      <member><type>VkBool32</type>               <name>protectedSubmit</name></member>
+    </type>
+    <type category="struct" name="VkSubmitInfo">
+      <member values="VK_STRUCTURE_TYPE_SUBMIT_INFO"><type>VkStructureType</type> <name>sType</name></member>
+      <member optional="true">const <type>void</type>*     <name>pNext</name></member>
+      <member optional="true"><type>uint32_t</type>       <name>waitSemaphoreCount</name></member>
+      <member len="waitSemaphoreCount">const <type>VkSemaphore</type>*     <name>pWaitSemaphores</name></member>
+      <member optional="false,true" len="waitSemaphoreCount">const <type>VkPipelineStageFlags</type>* <name>pWaitDstStageMask</name></member>
+      <member optional="true"><type>uint32_t</type>       <name>commandBufferCount</name></member>
+      <member len="commandBufferCount">const <type>VkCommandBuffer</type>*     <name>pCommandBuffers</name></member>
+      <member optional="true"><type>uint32_t</type>       <name>signalSemaphoreCount</name></member>
+      <member len="signalSemaphoreCount">const <type>VkSemaphore</type>*     <name>pSignalSemaphores</name></member>
+    </type>
+    <type category="struct" name="VkMemoryBarrier">
+      <member values="VK_STRUCTURE_TYPE_MEMORY_BARRIER"><type>VkStructureType</type> <name>sType</name></member>
+      <member optional="true">const <type>void</type>*            <name>pNext</name></member>
+      <member optional="true"><type>VkAccessFlags</type>          <name>srcAccessMask</name></member>
+      <member optional="true"><type>VkAccessFlags</type>          <name>dstAccessMask</name></member>
+    </type>
+    <type category="struct" name="VkBufferMemoryBarrier">
+      <member values="VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER"><type>VkStructureType</type> <name>sType</name></member>
+      <member optional="true">const <type>void</type>*            <name>pNext</name></member>
+      <member><type>VkAccessFlags</type>          <name>srcAccessMask</name></member>
+      <member><type>VkAccessFlags</type>          <name>dstAccessMask</name></member>
+      <member><type>uint32_t</type>               <name>srcQueueFamilyIndex</name></member>
+      <member><type>uint32_t</type>               <name>dstQueueFamilyIndex</name></member>
+      <member><type>VkBuffer</type>               <name>buffer</name></member>
+      <member><type>VkDeviceSize</type>           <name>offset</name></member>
+      <member><type>VkDeviceSize</type>           <name>size</name></member>
+    </type>
+    <type category="struct" name="VkImageMemoryBarrier">
+      <member values="VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER"><type>VkStructureType</type> <name>sType</name></member>
+      <member optional="true">const <type>void</type>*            <name>pNext</name></member>
+      <member noautovalidity="true"><type>VkAccessFlags</type>          <name>srcAccessMask</name></member>
+      <member noautovalidity="true"><type>VkAccessFlags</type>          <name>dstAccessMask</name></member>
+      <member><type>VkImageLayout</type>          <name>oldLayout</name></member>
+      <member><type>VkImageLayout</type>          <name>newLayout</name></member>
+      <member><type>uint32_t</type>               <name>srcQueueFamilyIndex</name></member>
+      <member><type>uint32_t</type>               <name>dstQueueFamilyIndex</name></member>
+      <member><type>VkImage</type>                <name>image</name></member>
+      <member><type>VkImageSubresourceRange</type> <name>subresourceRange</name></member>
+    </type>
   </types>
 
   <!-- enum TYPE declarations: members of these encode as int32 -->
@@ -121,6 +214,7 @@
   <enums name="VkSharingMode" type="enum"/>
   <enums name="VkFormat" type="enum"/>
   <enums name="VkCommandBufferLevel" type="enum"/>
+  <enums name="VkPhysicalDeviceType" type="enum"/>
 
   <enums name="VkStructureType" type="enum">
     <enum value="0"  name="VK_STRUCTURE_TYPE_APPLICATION_INFO"/>
@@ -131,6 +225,11 @@
     <enum value="14" name="VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO"/>
     <enum value="39" name="VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO"/>
     <enum value="40" name="VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO"/>
+    <enum value="4"  name="VK_STRUCTURE_TYPE_SUBMIT_INFO"/>
+    <enum value="44" name="VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER"/>
+    <enum value="45" name="VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER"/>
+    <enum value="46" name="VK_STRUCTURE_TYPE_MEMORY_BARRIER"/>
+    <enum value="1000145000" name="VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO"/>
   </enums>
 
   <enums name="API Constants" type="constants">
@@ -187,6 +286,26 @@
       <param>const <type>VkClearColorValue</type>* <name>pColor</name></param>
       <param><type>uint32_t</type> <name>rangeCount</name></param>
       <param len="rangeCount">const <type>VkImageSubresourceRange</type>* <name>pRanges</name></param>
+    </command>
+    <command>
+      <proto><type>VkResult</type> <name>vkQueueSubmit</name></proto>
+      <param externsync="true"><type>VkQueue</type> <name>queue</name></param>
+      <param><type>uint32_t</type> <name>submitCount</name></param>
+      <param len="submitCount">const <type>VkSubmitInfo</type>* <name>pSubmits</name></param>
+      <param optional="true" externsync="true"><type>VkFence</type> <name>fence</name></param>
+    </command>
+    <command>
+      <proto><type>void</type> <name>vkCmdPipelineBarrier</name></proto>
+      <param externsync="true"><type>VkCommandBuffer</type> <name>commandBuffer</name></param>
+      <param><type>VkPipelineStageFlags</type> <name>srcStageMask</name></param>
+      <param><type>VkPipelineStageFlags</type> <name>dstStageMask</name></param>
+      <param optional="true"><type>VkDependencyFlags</type> <name>dependencyFlags</name></param>
+      <param optional="true"><type>uint32_t</type> <name>memoryBarrierCount</name></param>
+      <param len="memoryBarrierCount">const <type>VkMemoryBarrier</type>* <name>pMemoryBarriers</name></param>
+      <param optional="true"><type>uint32_t</type> <name>bufferMemoryBarrierCount</name></param>
+      <param len="bufferMemoryBarrierCount">const <type>VkBufferMemoryBarrier</type>* <name>pBufferMemoryBarriers</name></param>
+      <param optional="true"><type>uint32_t</type> <name>imageMemoryBarrierCount</name></param>
+      <param len="imageMemoryBarrierCount">const <type>VkImageMemoryBarrier</type>* <name>pImageMemoryBarriers</name></param>
     </command>
   </commands>
 </registry>

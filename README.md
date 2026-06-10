@@ -21,19 +21,25 @@ from Mesa's generated headers — no GPU, no host required.**
   and `PeekArraySize`. Each method transcribes a specific Mesa
   `vn_encode_*` / `vn_decode_*` function (cited inline).
 - `gen` — parses `vk.xml` (`encoding/xml`) into a typed model and emits Go
-  encoders **and reply decoders** by walking struct/command members exactly as
+  encoders **and decoders** by walking struct/command members exactly as
   Mesa's Python generator does (honouring `optional` / `len` / `altlen` /
-  `sType` / `pNext`, enums→int32, handles, `VkBool32`/`VkDeviceSize`,
+  `sType` / `pNext`, enums→int32, handles, `VkBool32`/`VkDeviceSize`/`size_t`,
   nested-by-value structs, fixed-size arrays, the `VkClearColorValue` union,
-  and counted struct/scalar arrays).
+  counted struct/scalar/**handle/VkFlags** arrays, **typed `pNext` extension
+  chains**, **count+array reply decoders**, and **returned-only struct
+  decoders**).
 - `cmd/vkgen` — the generator CLI (`-xml`, `-out`, `-pkg`).
 - `proof` — a generated proof subset spanning the clear-image command closure
   (`vkCreateInstance/Device/Image`, `vkAllocateMemory`, `vkCreateCommandPool`,
-  `vkEnumeratePhysicalDevices`, `vkCmdClearColorImage`, plus the
-  `VkClearColorValue` union and `Decode_*_reply` decoders) whose encoded/decoded
-  bytes are asserted against independently hand-derived Mesa bytes.
+  `vkEnumeratePhysicalDevices`, `vkCmdClearColorImage`, `vkQueueSubmit`,
+  `vkCmdPipelineBarrier`, plus the `VkClearColorValue` union, the
+  `VkSubmitInfo` / `VkImageMemoryBarrier` `pNext`-chain encoders, the
+  `vkEnumeratePhysicalDevices` count+array reply decoder, and the
+  `VkMemoryRequirements` / `VkPhysicalDeviceProperties` returned-struct
+  decoders) whose encoded/decoded bytes are asserted against independently
+  hand-derived Mesa bytes.
 
-All four packages are at 100% statement coverage; `CGO_ENABLED=0 go build`
+All five packages are at 100% statement coverage; `CGO_ENABLED=0 go build`
 clean; zero external dependencies.
 
 > **Note:** this is the go-virtio family's only non-100%-confidence area in the
@@ -45,23 +51,43 @@ clean; zero external dependencies.
 
 - **The full encoder closure** (~120–200 structs/commands) for a real
   "create instance → device → image → clear → readback" path. The clear-image
-  *core* now encodes/decodes, but several commands still need generator
-  features the proof set deliberately stops short of (below).
-- **Generator gaps to a complete clear-image path**, each stopped at a clean
-  boundary rather than guessed:
-  - **`pNext` extension chains** — every struct emits `pNext = NULL`. A typed
-    `pNext` switch (sType-keyed) is unimplemented.
+  *core* — including the submit/barrier framing and the count/readback decode
+  rungs below — now encodes/decodes; what remains is breadth (the long tail of
+  structs/commands) plus the few generator features still stopped at a clean
+  boundary (below).
+- **Generator rungs now closed** (encoded/decoded bytes asserted against
+  independently hand-derived Mesa bytes):
+  - **`pNext` extension chains** — a typed, sType-keyed chain encoder
+    (`vncs.EncodePNextChain` + generated `<Struct>Node` constructors)
+    transcribed from Mesa's `vn_encode_<Struct>_pnext` walk, including the
+    recursion-before-self nesting. Proven on `VkSubmitInfo` (1-node
+    `VkProtectedSubmitInfo` chain) and `VkImageMemoryBarrier`.
+  - **Count+array reply decoders** — `vkEnumeratePhysicalDevices`-style replies
+    (`simple_pointer` out-count + a peeked counted handle array, with the
+    `vn_decode_array_size_unchecked` empty arm).
+  - **Returned-only struct decoders** — `VkMemoryRequirements` and the full
+    `VkPhysicalDeviceProperties` decode (enum, `char[N]`/`uint8[N]` fixed
+    arrays, `size_t`, nested `VkPhysicalDeviceLimits`/`SparseProperties`).
+  - **`vkQueueSubmit` / `vkCmdPipelineBarrier` framing** — `VkSubmitInfo`
+    (`pNext` chain + counted handle/`VkFlags` array members) and the
+    three-barrier-group pipeline-barrier command.
+- **Generator gaps still open**, each stopped at a clean boundary rather than
+  guessed:
+  - **The full `VkPhysicalDeviceLimits` (all ~106 members).** The decode
+    *generator* handles every member *shape* the real struct uses, proven on a
+    curated representative slice (uint32 / `VkDeviceSize` / fixed `uint32[N]` /
+    `float` / `size_t` / `int32` / `VkFlags` / `VkBool32` / fixed `float[N]`).
+    The remaining members are mechanically identical; they are left out only to
+    keep the hand-derived byte stream auditable, not because of any ambiguity.
   - **Unions beyond the single-selector numeric shape** — only the
     `VkClearColorValue`-style 4-element float/int32/uint32 union is emitted;
-    pointer-bearing or multi-shape unions are not.
-  - **Non-create reply decoders** — reply decode covers the single-handle
-    "create" replies; the count+array reply (e.g.
-    `vkEnumeratePhysicalDevices`) and `_partial` returned-only structs
-    (`VkPhysicalDeviceProperties`/`Limits`, `VkMemoryRequirements`) are not yet
-    emitted on the decode side.
-  - **`vkQueueSubmit`/`vkCmdPipelineBarrier` framing** — their `VkSubmitInfo` /
-    `VkImageMemoryBarrier` inputs need `pNext` and counted-handle-array members
-    the emitter does not yet cover.
+    pointer-bearing or multi-shape unions are not (no cleanly-derivable case in
+    the clear-image path).
+  - **The accepted-sType *membership* per parent chain.** The chain *encoding*
+    is faithful, but which extension structs a given parent accepts is Mesa's
+    per-parent generated switch (not in `vk.xml`); the generator takes the
+    accepted node set as an explicit input rather than reconstructing that
+    switch.
 - **The transport — the real unknown.** Venus needs a virtio-gpu context with
   `context_init = VIRTIO_GPU_CAPSET_VENUS (4)` (requiring `F_CONTEXT_INIT` +
   `RESOURCE_BLOB`), a guest/host **shared-memory command ring**, `EXECBUFFER`

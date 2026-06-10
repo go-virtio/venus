@@ -124,6 +124,115 @@ type VkClearColorValue struct {
 	Uint32  [4]uint32
 }
 
+// VkSubmitInfo is the pure-Go input for the generated EncodeVkSubmitInfo
+// encoder. sType is fixed by the struct identity; PNext is the
+// (possibly empty) extension chain, encoded via EncodePNextChain.
+type VkSubmitInfo struct {
+	PNext                []vncs.PNextNode
+	WaitSemaphoreCount   uint32
+	PWaitSemaphores      []uint64
+	PWaitDstStageMask    []uint32
+	CommandBufferCount   uint32
+	PCommandBuffers      []uint64
+	SignalSemaphoreCount uint32
+	PSignalSemaphores    []uint64
+}
+
+// VkImageMemoryBarrier is the pure-Go input for the generated EncodeVkImageMemoryBarrier
+// encoder. sType is fixed by the struct identity; PNext is the
+// (possibly empty) extension chain, encoded via EncodePNextChain.
+type VkImageMemoryBarrier struct {
+	PNext               []vncs.PNextNode
+	SrcAccessMask       uint32
+	DstAccessMask       uint32
+	OldLayout           int32
+	NewLayout           int32
+	SrcQueueFamilyIndex uint32
+	DstQueueFamilyIndex uint32
+	Image               uint64
+	SubresourceRange    VkImageSubresourceRange
+}
+
+// VkMemoryBarrier is the pure-Go input for the generated EncodeVkMemoryBarrier
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkMemoryBarrier struct {
+	SrcAccessMask uint32
+	DstAccessMask uint32
+}
+
+// VkBufferMemoryBarrier is the pure-Go input for the generated EncodeVkBufferMemoryBarrier
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkBufferMemoryBarrier struct {
+	SrcAccessMask       uint32
+	DstAccessMask       uint32
+	SrcQueueFamilyIndex uint32
+	DstQueueFamilyIndex uint32
+	Buffer              uint64
+	Offset              uint64
+	Size                uint64
+}
+
+// VkMemoryRequirements is the pure-Go input for the generated EncodeVkMemoryRequirements
+// encoder (a plain nested-by-value Vulkan struct, no sType).
+type VkMemoryRequirements struct {
+	Size           uint64
+	Alignment      uint64
+	MemoryTypeBits uint32
+}
+
+// VkPhysicalDeviceLimits is the pure-Go input for the generated EncodeVkPhysicalDeviceLimits
+// encoder (a plain nested-by-value Vulkan struct, no sType).
+type VkPhysicalDeviceLimits struct {
+	MaxImageDimension1D          uint32
+	MaxImageDimension2D          uint32
+	MaxImageDimension3D          uint32
+	MaxImageDimensionCube        uint32
+	MaxImageArrayLayers          uint32
+	MaxTexelBufferElements       uint32
+	BufferImageGranularity       uint64
+	MaxComputeWorkGroupCount     [3]uint32
+	MaxSamplerLodBias            float32
+	MinMemoryMapAlignment        uint64
+	MinTexelOffset               int32
+	FramebufferColorSampleCounts uint32
+	TimestampComputeAndGraphics  bool
+	PointSizeRange               [2]float32
+	NonCoherentAtomSize          uint64
+}
+
+// VkPhysicalDeviceSparseProperties is the pure-Go input for the generated EncodeVkPhysicalDeviceSparseProperties
+// encoder (a plain nested-by-value Vulkan struct, no sType).
+type VkPhysicalDeviceSparseProperties struct {
+	ResidencyStandard2DBlockShape            bool
+	ResidencyStandard2DMultisampleBlockShape bool
+	ResidencyStandard3DBlockShape            bool
+	ResidencyAlignedMipSize                  bool
+	ResidencyNonResidentStrict               bool
+}
+
+// VkPhysicalDeviceProperties is the pure-Go input for the generated EncodeVkPhysicalDeviceProperties
+// encoder (a plain nested-by-value Vulkan struct, no sType).
+type VkPhysicalDeviceProperties struct {
+	ApiVersion        uint32
+	DriverVersion     uint32
+	VendorID          uint32
+	DeviceID          uint32
+	DeviceType        int32
+	DeviceName        string
+	PipelineCacheUUID []byte
+	Limits            VkPhysicalDeviceLimits
+	SparseProperties  VkPhysicalDeviceSparseProperties
+}
+
+// VkProtectedSubmitInfo is the pure-Go input for the generated EncodeVkProtectedSubmitInfo
+// encoder. sType and pNext are not fields: sType is fixed by the
+// struct identity and pNext is NULL (no extension chain emitted).
+type VkProtectedSubmitInfo struct {
+	ProtectedSubmit bool
+}
+
 // EncodeVkApplicationInfo encodes a VkApplicationInfo onto enc, following Mesa
 // vn_encode_VkApplicationInfo: sType (int32) + pNext (simple_pointer NULL)
 // + self members in declaration order.
@@ -318,6 +427,90 @@ func EncodeVkClearColorValue(enc *vncs.Encoder, v *VkClearColorValue) {
 	}
 }
 
+// EncodeVkSubmitInfo encodes a VkSubmitInfo onto enc, following Mesa
+// vn_encode_VkSubmitInfo: sType (int32) + the pNext chain (vn_encode_VkSubmitInfo_pnext)
+// + self members in declaration order.
+func EncodeVkSubmitInfo(enc *vncs.Encoder, v *VkSubmitInfo) {
+	enc.EncodeInt32(4)            // sType = VK_STRUCTURE_TYPE_SUBMIT_INFO
+	enc.EncodePNextChain(v.PNext) // pNext extension chain
+	enc.EncodeUint32(v.WaitSemaphoreCount)
+	if len(v.PWaitSemaphores) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PWaitSemaphores)))
+		for i := range v.PWaitSemaphores {
+			enc.EncodeHandle(v.PWaitSemaphores[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	if len(v.PWaitDstStageMask) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PWaitDstStageMask)))
+		for i := range v.PWaitDstStageMask {
+			enc.EncodeFlags(v.PWaitDstStageMask[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeUint32(v.CommandBufferCount)
+	if len(v.PCommandBuffers) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PCommandBuffers)))
+		for i := range v.PCommandBuffers {
+			enc.EncodeHandle(v.PCommandBuffers[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeUint32(v.SignalSemaphoreCount)
+	if len(v.PSignalSemaphores) != 0 {
+		enc.EncodeArraySize(uint64(len(v.PSignalSemaphores)))
+		for i := range v.PSignalSemaphores {
+			enc.EncodeHandle(v.PSignalSemaphores[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+}
+
+// EncodeVkImageMemoryBarrier encodes a VkImageMemoryBarrier onto enc, following Mesa
+// vn_encode_VkImageMemoryBarrier: sType (int32) + the pNext chain (vn_encode_VkImageMemoryBarrier_pnext)
+// + self members in declaration order.
+func EncodeVkImageMemoryBarrier(enc *vncs.Encoder, v *VkImageMemoryBarrier) {
+	enc.EncodeInt32(45)           // sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER
+	enc.EncodePNextChain(v.PNext) // pNext extension chain
+	enc.EncodeFlags(v.SrcAccessMask)
+	enc.EncodeFlags(v.DstAccessMask)
+	enc.EncodeInt32(v.OldLayout) // enum VkImageLayout
+	enc.EncodeInt32(v.NewLayout) // enum VkImageLayout
+	enc.EncodeUint32(v.SrcQueueFamilyIndex)
+	enc.EncodeUint32(v.DstQueueFamilyIndex)
+	enc.EncodeHandle(v.Image) // handle VkImage
+	EncodeVkImageSubresourceRange(enc, &v.SubresourceRange)
+}
+
+// EncodeVkMemoryBarrier encodes a VkMemoryBarrier onto enc, following Mesa
+// vn_encode_VkMemoryBarrier: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkMemoryBarrier(enc *vncs.Encoder, v *VkMemoryBarrier) {
+	enc.EncodeInt32(46)            // sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER
+	enc.EncodeSimplePointer(false) // pNext = NULL
+	enc.EncodeFlags(v.SrcAccessMask)
+	enc.EncodeFlags(v.DstAccessMask)
+}
+
+// EncodeVkBufferMemoryBarrier encodes a VkBufferMemoryBarrier onto enc, following Mesa
+// vn_encode_VkBufferMemoryBarrier: sType (int32) + pNext (simple_pointer NULL)
+// + self members in declaration order.
+func EncodeVkBufferMemoryBarrier(enc *vncs.Encoder, v *VkBufferMemoryBarrier) {
+	enc.EncodeInt32(44)            // sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER
+	enc.EncodeSimplePointer(false) // pNext = NULL
+	enc.EncodeFlags(v.SrcAccessMask)
+	enc.EncodeFlags(v.DstAccessMask)
+	enc.EncodeUint32(v.SrcQueueFamilyIndex)
+	enc.EncodeUint32(v.DstQueueFamilyIndex)
+	enc.EncodeHandle(v.Buffer) // handle VkBuffer
+	enc.EncodeDeviceSize(v.Offset)
+	enc.EncodeDeviceSize(v.Size)
+}
+
 // Encode_vkCreateInstance frames the vkCreateInstance command: VkCommandTypeEXT
 // (int32 = VK_COMMAND_TYPE_vkCreateInstance_EXT) + cmdFlags (VkFlags) + the encoded params,
 // per Mesa vn_encode_vkCreateInstance.
@@ -440,6 +633,64 @@ func Encode_vkCmdClearColorImage(enc *vncs.Encoder, cmdFlags uint32, commandBuff
 	}
 }
 
+// Encode_vkQueueSubmit frames the vkQueueSubmit command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkQueueSubmit_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkQueueSubmit.
+func Encode_vkQueueSubmit(enc *vncs.Encoder, cmdFlags uint32, queue uint64, submitCount uint32, pSubmits []VkSubmitInfo, fence uint64) {
+	enc.EncodeInt32(18) // cmd_type = VK_COMMAND_TYPE_vkQueueSubmit_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(queue) // handle VkQueue
+	enc.EncodeUint32(submitCount)
+	if len(pSubmits) != 0 {
+		enc.EncodeArraySize(uint64(len(pSubmits)))
+		for i := range pSubmits {
+			EncodeVkSubmitInfo(enc, &pSubmits[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeHandle(fence) // handle VkFence
+}
+
+// Encode_vkCmdPipelineBarrier frames the vkCmdPipelineBarrier command: VkCommandTypeEXT
+// (int32 = VK_COMMAND_TYPE_vkCmdPipelineBarrier_EXT) + cmdFlags (VkFlags) + the encoded params,
+// per Mesa vn_encode_vkCmdPipelineBarrier.
+func Encode_vkCmdPipelineBarrier(enc *vncs.Encoder, cmdFlags uint32, commandBuffer uint64, srcStageMask uint32, dstStageMask uint32, dependencyFlags uint32, memoryBarrierCount uint32, pMemoryBarriers []VkMemoryBarrier, bufferMemoryBarrierCount uint32, pBufferMemoryBarriers []VkBufferMemoryBarrier, imageMemoryBarrierCount uint32, pImageMemoryBarriers []VkImageMemoryBarrier) {
+	enc.EncodeInt32(126) // cmd_type = VK_COMMAND_TYPE_vkCmdPipelineBarrier_EXT
+	enc.EncodeFlags(cmdFlags)
+	enc.EncodeHandle(commandBuffer) // handle VkCommandBuffer
+	enc.EncodeFlags(srcStageMask)
+	enc.EncodeFlags(dstStageMask)
+	enc.EncodeFlags(dependencyFlags)
+	enc.EncodeUint32(memoryBarrierCount)
+	if len(pMemoryBarriers) != 0 {
+		enc.EncodeArraySize(uint64(len(pMemoryBarriers)))
+		for i := range pMemoryBarriers {
+			EncodeVkMemoryBarrier(enc, &pMemoryBarriers[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeUint32(bufferMemoryBarrierCount)
+	if len(pBufferMemoryBarriers) != 0 {
+		enc.EncodeArraySize(uint64(len(pBufferMemoryBarriers)))
+		for i := range pBufferMemoryBarriers {
+			EncodeVkBufferMemoryBarrier(enc, &pBufferMemoryBarriers[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+	enc.EncodeUint32(imageMemoryBarrierCount)
+	if len(pImageMemoryBarriers) != 0 {
+		enc.EncodeArraySize(uint64(len(pImageMemoryBarriers)))
+		for i := range pImageMemoryBarriers {
+			EncodeVkImageMemoryBarrier(enc, &pImageMemoryBarriers[i])
+		}
+	} else {
+		enc.EncodeArraySize(0)
+	}
+}
+
 // VkCreateInstanceReplyCmdType is the VkCommandTypeEXT the vkCreateInstance reply echoes
 // (VK_COMMAND_TYPE_vkCreateInstance_EXT).
 const VkCreateInstanceReplyCmdType int32 = 0
@@ -533,4 +784,108 @@ func Decode_vkCreateCommandPool_reply(dec *vncs.Decoder) (cmdType int32, result 
 		ok = true
 	}
 	return cmdType, result, pCommandPool, ok
+}
+
+// VkEnumeratePhysicalDevicesReplyCmdType is the VkCommandTypeEXT the vkEnumeratePhysicalDevices reply echoes
+// (VK_COMMAND_TYPE_vkEnumeratePhysicalDevices_EXT).
+const VkEnumeratePhysicalDevicesReplyCmdType int32 = 2
+
+// Decode_vkEnumeratePhysicalDevices_reply decodes the vkEnumeratePhysicalDevices reply, per Mesa
+// vn_decode_vkEnumeratePhysicalDevices_reply: command-type echo + VkResult +
+// simple_pointer(pPhysicalDeviceCount)+uint32 + peeked counted pPhysicalDevices handle array.
+// countOK is the count's simple_pointer flag; pPhysicalDevices is nil when the
+// peeked array_size is 0 (the array_size(0) is still consumed, matching
+// vn_decode_array_size_unchecked).
+func Decode_vkEnumeratePhysicalDevices_reply(dec *vncs.Decoder) (cmdType int32, result int32, pPhysicalDeviceCount uint32, countOK bool, pPhysicalDevices []uint64) {
+	cmdType = dec.DecodeInt32() // echoed VK_COMMAND_TYPE_vkEnumeratePhysicalDevices_EXT
+	result = dec.DecodeResult()
+	if dec.DecodeSimplePointer() {
+		pPhysicalDeviceCount = dec.DecodeUint32()
+		countOK = true
+	}
+	if dec.PeekArraySize() != 0 {
+		n := dec.DecodeArraySize(uint64(pPhysicalDeviceCount))
+		pPhysicalDevices = make([]uint64, n)
+		for i := range pPhysicalDevices {
+			pPhysicalDevices[i] = dec.DecodeHandle()
+		}
+	} else {
+		dec.DecodeArraySizeUnchecked() // consume the array_size(0)
+	}
+	return cmdType, result, pPhysicalDeviceCount, countOK, pPhysicalDevices
+}
+
+// DecodeVkMemoryRequirements decodes a VkMemoryRequirements from dec, following Mesa
+// vn_decode_VkMemoryRequirements: members in declaration order.
+func DecodeVkMemoryRequirements(dec *vncs.Decoder, v *VkMemoryRequirements) {
+	v.Size = dec.DecodeDeviceSize()
+	v.Alignment = dec.DecodeDeviceSize()
+	v.MemoryTypeBits = dec.DecodeUint32()
+}
+
+// DecodeVkPhysicalDeviceLimits decodes a VkPhysicalDeviceLimits from dec, following Mesa
+// vn_decode_VkPhysicalDeviceLimits: members in declaration order.
+func DecodeVkPhysicalDeviceLimits(dec *vncs.Decoder, v *VkPhysicalDeviceLimits) {
+	v.MaxImageDimension1D = dec.DecodeUint32()
+	v.MaxImageDimension2D = dec.DecodeUint32()
+	v.MaxImageDimension3D = dec.DecodeUint32()
+	v.MaxImageDimensionCube = dec.DecodeUint32()
+	v.MaxImageArrayLayers = dec.DecodeUint32()
+	v.MaxTexelBufferElements = dec.DecodeUint32()
+	v.BufferImageGranularity = dec.DecodeDeviceSize()
+	{
+		n := dec.DecodeArraySize(3)
+		copy(v.MaxComputeWorkGroupCount[:], dec.DecodeUint32Array(int(n)))
+	}
+	v.MaxSamplerLodBias = dec.DecodeFloat32()
+	v.MinMemoryMapAlignment = dec.DecodeSizeT()
+	v.MinTexelOffset = dec.DecodeInt32()
+	v.FramebufferColorSampleCounts = dec.DecodeFlags()
+	v.TimestampComputeAndGraphics = dec.DecodeBool32()
+	{
+		n := dec.DecodeArraySize(2)
+		copy(v.PointSizeRange[:], dec.DecodeFloat32Array(int(n)))
+	}
+	v.NonCoherentAtomSize = dec.DecodeDeviceSize()
+}
+
+// DecodeVkPhysicalDeviceSparseProperties decodes a VkPhysicalDeviceSparseProperties from dec, following Mesa
+// vn_decode_VkPhysicalDeviceSparseProperties: members in declaration order.
+func DecodeVkPhysicalDeviceSparseProperties(dec *vncs.Decoder, v *VkPhysicalDeviceSparseProperties) {
+	v.ResidencyStandard2DBlockShape = dec.DecodeBool32()
+	v.ResidencyStandard2DMultisampleBlockShape = dec.DecodeBool32()
+	v.ResidencyStandard3DBlockShape = dec.DecodeBool32()
+	v.ResidencyAlignedMipSize = dec.DecodeBool32()
+	v.ResidencyNonResidentStrict = dec.DecodeBool32()
+}
+
+// DecodeVkPhysicalDeviceProperties decodes a VkPhysicalDeviceProperties from dec, following Mesa
+// vn_decode_VkPhysicalDeviceProperties: members in declaration order.
+func DecodeVkPhysicalDeviceProperties(dec *vncs.Decoder, v *VkPhysicalDeviceProperties) {
+	v.ApiVersion = dec.DecodeUint32()
+	v.DriverVersion = dec.DecodeUint32()
+	v.VendorID = dec.DecodeUint32()
+	v.DeviceID = dec.DecodeUint32()
+	v.DeviceType = dec.DecodeInt32() // enum VkPhysicalDeviceType
+	{
+		n := dec.DecodeArraySize(256)
+		v.DeviceName = string(dec.DecodeCharArray(int(n)))
+	}
+	{
+		n := dec.DecodeArraySize(16)
+		v.PipelineCacheUUID = dec.DecodeUint8Array(int(n))
+	}
+	DecodeVkPhysicalDeviceLimits(dec, &v.Limits)
+	DecodeVkPhysicalDeviceSparseProperties(dec, &v.SparseProperties)
+}
+
+// EncodeVkProtectedSubmitInfoSelf encodes just the self members of a VkProtectedSubmitInfo
+// (no sType/pNext), per Mesa vn_encode_VkProtectedSubmitInfo_self — used as a pNext node.
+func EncodeVkProtectedSubmitInfoSelf(enc *vncs.Encoder, v *VkProtectedSubmitInfo) {
+	enc.EncodeBool32(v.ProtectedSubmit)
+}
+
+// VkProtectedSubmitInfoNode wraps v as a pNext chain node (sType VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO = 1000145000).
+func VkProtectedSubmitInfoNode(v *VkProtectedSubmitInfo) vncs.PNextNode {
+	return vncs.PNextNode{SType: 1000145000, EncodeSelf: func(enc *vncs.Encoder) { EncodeVkProtectedSubmitInfoSelf(enc, v) }}
 }

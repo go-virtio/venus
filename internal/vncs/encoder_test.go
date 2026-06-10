@@ -242,3 +242,60 @@ func TestEncodeStringPanicsOnInteriorNUL(t *testing.T) {
 	}()
 	NewEncoder().EncodeString("a\x00b")
 }
+
+// le32b/le64b build little-endian dwords/qwords for the hand-derived pNext
+// chain streams below (kept local so the vncs tests stay self-contained).
+func le32b(v uint32) []byte { return []byte{byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24)} }
+func le64b(v uint64) []byte {
+	return []byte{
+		byte(v), byte(v >> 8), byte(v >> 16), byte(v >> 24),
+		byte(v >> 32), byte(v >> 40), byte(v >> 48), byte(v >> 56),
+	}
+}
+
+// TestEncodePNextChain validates EncodePNextChain against bytes hand-derived
+// from Mesa's vn_encode_<Struct>_pnext walk for the empty, 1-node and 2-node
+// cases. The recursion-before-self nesting is the load-bearing detail: the
+// per-node sp(1)+sType prefixes nest outermost-first while the self payloads
+// unwind innermost-first.
+func TestEncodePNextChain(t *testing.T) {
+	// Empty chain: a single simple_pointer(NULL) == array_size(0) == LE 0 qword.
+	eEmpty := NewEncoder()
+	eEmpty.EncodePNextChain(nil)
+	if !bytes.Equal(eEmpty.Bytes(), le64b(0)) {
+		t.Fatalf("empty chain\n got % x\nwant % x", eEmpty.Bytes(), le64b(0))
+	}
+
+	// 1-node chain: node A (sType 1000314000, self = one uint32 0xAA).
+	//   sp(1)  sTypeA  [recurse(nil): sp(0)]  selfA
+	const sTypeA = int32(1000314000)
+	nodeA := PNextNode{SType: sTypeA, EncodeSelf: func(e *Encoder) { e.EncodeUint32(0xAA) }}
+	e1 := NewEncoder()
+	e1.EncodePNextChain([]PNextNode{nodeA})
+	var want1 []byte
+	want1 = append(want1, le64b(1)...)              // sp(1): node A present
+	want1 = append(want1, le32b(uint32(sTypeA))...) // sTypeA
+	want1 = append(want1, le64b(0)...)              // recurse(nil): sp(0) end of chain
+	want1 = append(want1, le32b(0xAA)...)           // selfA
+	if !bytes.Equal(e1.Bytes(), want1) {
+		t.Fatalf("1-node chain\n got % x\nwant % x", e1.Bytes(), want1)
+	}
+
+	// 2-node chain A->B: B's sType 1000207000, self = one uint64 0xBBBB.
+	//   sp(1) sTypeA  sp(1) sTypeB  sp(0)  selfB  selfA
+	const sTypeB = int32(1000207000)
+	nodeB := PNextNode{SType: sTypeB, EncodeSelf: func(e *Encoder) { e.EncodeUint64(0xBBBB) }}
+	e2 := NewEncoder()
+	e2.EncodePNextChain([]PNextNode{nodeA, nodeB})
+	var want2 []byte
+	want2 = append(want2, le64b(1)...)              // sp(1): node A present
+	want2 = append(want2, le32b(uint32(sTypeA))...) // sTypeA
+	want2 = append(want2, le64b(1)...)              // sp(1): node B present (recursion)
+	want2 = append(want2, le32b(uint32(sTypeB))...) // sTypeB
+	want2 = append(want2, le64b(0)...)              // sp(0): end of chain
+	want2 = append(want2, le64b(0xBBBB)...)         // selfB (innermost unwinds first)
+	want2 = append(want2, le32b(0xAA)...)           // selfA
+	if !bytes.Equal(e2.Bytes(), want2) {
+		t.Fatalf("2-node chain\n got % x\nwant % x", e2.Bytes(), want2)
+	}
+}

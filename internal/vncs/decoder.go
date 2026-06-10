@@ -143,6 +143,92 @@ func (d *Decoder) PeekArraySize() uint64 {
 	return binary.LittleEndian.Uint64(d.buf[d.pos : d.pos+8])
 }
 
+// DecodeArraySizeUnchecked mirrors vn_decode_array_size_unchecked:
+//
+//	static inline uint64_t
+//	vn_decode_array_size_unchecked(struct vn_cs_decoder *dec)
+//	{
+//	    uint64_t size;
+//	    vn_decode_uint64_t(dec, &size);
+//	    return size;
+//	}
+//
+// i.e. an 8-byte LE prefix consumed with no max_size bound. Reply decoders
+// use it on the absent arm of an out-array to skip the encoded array_size(0)
+// (vn_decode_vkEnumeratePhysicalDevices_reply).
+func (d *Decoder) DecodeArraySizeUnchecked() uint64 { return d.DecodeUint64() }
+
+// DecodeSizeT mirrors vn_decode_size_t:
+//
+//	static inline void
+//	vn_decode_size_t(struct vn_cs_decoder *dec, size_t *val)
+//	{
+//	    uint64_t tmp;
+//	    vn_decode_uint64_t(dec, &tmp);
+//	    *val = tmp;
+//	}
+//
+// i.e. an 8-byte LE uint64 widened from the wire (size_t is serialised as
+// uint64 regardless of host width). Used by VkPhysicalDeviceLimits's
+// minMemoryMapAlignment member.
+func (d *Decoder) DecodeSizeT() uint64 { return d.DecodeUint64() }
+
+// DecodeUint8Array mirrors vn_decode_uint8_t_array:
+//
+//	const size_t size = sizeof(*val) * count;   // == count
+//	vn_decode(dec, (size + 3) & ~3, val, size);
+//
+// i.e. count payload bytes consumed past a 4-byte-padded span. Used by
+// fixed uint8[N] returned fields (VkPhysicalDeviceProperties.pipelineCacheUUID).
+func (d *Decoder) DecodeUint8Array(count int) []byte {
+	return d.read((count+3)&^3, count)
+}
+
+// DecodeCharArray mirrors vn_decode_char_array:
+//
+//	vn_decode_blob_array(dec, val, size);
+//	if (size) val[size - 1] = '\0'; else set_fatal;
+//
+// The returned bytes are the size-byte blob (cursor advances past the padded
+// span); Venus guarantees the last byte is the NUL terminator. A zero size is
+// a protocol error (Mesa sets the decoder fatal). Used by fixed char[N]
+// returned fields (VkPhysicalDeviceProperties.deviceName).
+func (d *Decoder) DecodeCharArray(size int) []byte {
+	if size == 0 {
+		d.fatal = true
+		return nil
+	}
+	return d.read((size+3)&^3, size)
+}
+
+// DecodeUint32Array mirrors vn_decode_uint32_t_array: count contiguous 4-byte
+// LE dwords.
+func (d *Decoder) DecodeUint32Array(count int) []uint32 {
+	out := make([]uint32, count)
+	for i := range out {
+		out[i] = d.DecodeUint32()
+	}
+	return out
+}
+
+// DecodeInt32Array mirrors vn_decode_int32_t_array.
+func (d *Decoder) DecodeInt32Array(count int) []int32 {
+	out := make([]int32, count)
+	for i := range out {
+		out[i] = d.DecodeInt32()
+	}
+	return out
+}
+
+// DecodeFloat32Array mirrors vn_decode_float_array.
+func (d *Decoder) DecodeFloat32Array(count int) []float32 {
+	out := make([]float32, count)
+	for i := range out {
+		out[i] = d.DecodeFloat32()
+	}
+	return out
+}
+
 // DecodeSimplePointer mirrors vn_decode_simple_pointer:
 //
 //	static inline bool
