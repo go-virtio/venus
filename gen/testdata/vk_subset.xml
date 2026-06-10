@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<registry>
+  <types>
+        <type category="struct" name="VkApplicationInfo">
+            <member values="VK_STRUCTURE_TYPE_APPLICATION_INFO"><type>VkStructureType</type> <name>sType</name></member>
+            <member optional="true">const <type>void</type>*     <name>pNext</name></member>
+            <member optional="true" len="null-terminated">const <type>char</type>*     <name>pApplicationName</name></member>
+            <member><type>uint32_t</type>        <name>applicationVersion</name></member>
+            <member optional="true" len="null-terminated">const <type>char</type>*     <name>pEngineName</name></member>
+            <member><type>uint32_t</type>        <name>engineVersion</name></member>
+            <member><type>uint32_t</type>        <name>apiVersion</name></member>
+        </type>
+        <type category="struct" name="VkInstanceCreateInfo">
+            <member values="VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO"><type>VkStructureType</type> <name>sType</name></member>
+            <member optional="true">const <type>void</type>*     <name>pNext</name></member>
+            <member optional="true"><type>VkInstanceCreateFlags</type>  <name>flags</name></member>
+            <member optional="true">const <type>VkApplicationInfo</type>* <name>pApplicationInfo</name></member>
+            <member optional="true"><type>uint32_t</type>               <name>enabledLayerCount</name></member>
+            <member len="enabledLayerCount,null-terminated">const <type>char</type>* const*      <name>ppEnabledLayerNames</name><comment>Ordered list of layer names to be enabled</comment></member>
+            <member optional="true"><type>uint32_t</type>               <name>enabledExtensionCount</name></member>
+            <member len="enabledExtensionCount,null-terminated">const <type>char</type>* const*      <name>ppEnabledExtensionNames</name><comment>Extension names to be enabled</comment></member>
+        </type>
+  </types>
+  <enums name="VkStructureType" type="enum">
+        <enum value="0"     name="VK_STRUCTURE_TYPE_APPLICATION_INFO"/>
+        <enum value="1"     name="VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO"/>
+  </enums>
+  <commands>
+    <command>
+            <proto><type>VkResult</type> <name>vkCreateInstance</name></proto>
+            <param>const <type>VkInstanceCreateInfo</type>* <name>pCreateInfo</name></param>
+            <param optional="true">const <type>VkAllocationCallbacks</type>* <name>pAllocator</name></param>
+            <param><type>VkInstance</type>* <name>pInstance</name></param>
+        </command>
+  </commands>
+</registry>
