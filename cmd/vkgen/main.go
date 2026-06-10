@@ -33,6 +33,7 @@ var (
 		"VkMemoryAllocateInfo",
 		"VkCommandPoolCreateInfo",
 		"VkCommandBufferAllocateInfo",
+		"VkCommandBufferBeginInfo",
 		"VkImageSubresourceRange",
 		"VkClearColorValue",
 		"VkSubmitInfo",
@@ -41,13 +42,23 @@ var (
 	proofCommands = []string{
 		"vkCreateInstance",
 		"vkEnumeratePhysicalDevices",
+		"vkGetPhysicalDeviceMemoryProperties",
+		"vkGetPhysicalDeviceQueueFamilyProperties",
 		"vkCreateDevice",
+		"vkGetDeviceQueue",
 		"vkCreateImage",
+		"vkGetImageMemoryRequirements",
 		"vkAllocateMemory",
+		"vkBindImageMemory",
 		"vkCreateCommandPool",
+		"vkAllocateCommandBuffers",
+		"vkBeginCommandBuffer",
+		"vkEndCommandBuffer",
 		"vkCmdClearColorImage",
 		"vkQueueSubmit",
 		"vkCmdPipelineBarrier",
+		"vkQueueWaitIdle",
+		"vkWaitForFences",
 	}
 	proofReplies = []string{
 		"vkCreateInstance",
@@ -66,6 +77,45 @@ var (
 	proofDecodeStructs = []string{
 		"VkMemoryRequirements",
 		"VkPhysicalDeviceProperties",
+		"VkPhysicalDeviceMemoryProperties",
+		"VkQueueFamilyProperties",
+	}
+	// proofPartialStructs is the set of returned-only structs a Get*-query
+	// encodes as a _partial skeleton on the request side.
+	proofPartialStructs = []string{
+		"VkMemoryRequirements",
+		"VkPhysicalDeviceMemoryProperties",
+		"VkQueueFamilyProperties",
+	}
+	// proofResultReplies are commands whose reply is just cmd-echo + VkResult.
+	proofResultReplies = []string{
+		"vkBindImageMemory",
+		"vkBeginCommandBuffer",
+		"vkEndCommandBuffer",
+		"vkQueueWaitIdle",
+		"vkWaitForFences",
+	}
+	// proofVoidHandleReplies are void commands whose reply is a single handle
+	// behind a simple_pointer (vkGetDeviceQueue).
+	proofVoidHandleReplies = []string{
+		"vkGetDeviceQueue",
+	}
+	// proofStructReplies are void Get*-queries whose reply decodes a single
+	// returned struct behind a simple_pointer.
+	proofStructReplies = []string{
+		"vkGetImageMemoryRequirements",
+		"vkGetPhysicalDeviceMemoryProperties",
+	}
+	// proofCountStructArrayReplies are void queries whose reply is a uint32
+	// count + a counted struct array (vkGetPhysicalDeviceQueueFamilyProperties).
+	proofCountStructArrayReplies = []string{
+		"vkGetPhysicalDeviceQueueFamilyProperties",
+	}
+	// proofCountHandleArrayStructReplies are commands whose reply is a VkResult
+	// + a counted handle array whose count comes from a struct field
+	// (vkAllocateCommandBuffers).
+	proofCountHandleArrayStructReplies = []string{
+		"vkAllocateCommandBuffers",
 	}
 	// proofPNextChains is the set of sType structs whose encoder emits a real
 	// pNext extension chain (VkSubmitInfo / VkImageMemoryBarrier on the
@@ -102,7 +152,7 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("read %s: %w", *xmlPath, err)
 	}
-	src, err := Generate(data, *pkg, proofStructs, proofCommands, proofReplies, proofCountArrayReplies, proofDecodeStructs, proofPNextChains, proofPNextNodes)
+	src, err := Generate(data, *pkg, proofSets())
 	if err != nil {
 		return err
 	}
@@ -113,23 +163,64 @@ func run() error {
 	return nil
 }
 
+// ProofSet bundles every struct/command/reply/decode subset the generator is
+// driven with, so the (now sizeable) configuration travels as one value instead
+// of a dozen positional slices.
+type ProofSet struct {
+	Structs                     []string
+	Commands                    []string
+	Replies                     []string
+	CountArrayReplies           []string
+	DecodeStructs               []string
+	PNextChains                 []string
+	PNextNodes                  []string
+	PartialStructs              []string
+	ResultReplies               []string
+	VoidHandleReplies           []string
+	StructReplies               []string
+	CountStructArrayReplies     []string
+	CountHandleArrayStructReply []string
+}
+
+// proofSets returns the M0 proof subset configuration.
+func proofSets() ProofSet {
+	return ProofSet{
+		Structs:                     proofStructs,
+		Commands:                    proofCommands,
+		Replies:                     proofReplies,
+		CountArrayReplies:           proofCountArrayReplies,
+		DecodeStructs:               proofDecodeStructs,
+		PNextChains:                 proofPNextChains,
+		PNextNodes:                  proofPNextNodes,
+		PartialStructs:              proofPartialStructs,
+		ResultReplies:               proofResultReplies,
+		VoidHandleReplies:           proofVoidHandleReplies,
+		StructReplies:               proofStructReplies,
+		CountStructArrayReplies:     proofCountStructArrayReplies,
+		CountHandleArrayStructReply: proofCountHandleArrayStructReplies,
+	}
+}
+
 // Generate parses data and emits gofmt'd Go source for the given subset.
 // Exposed (not just inlined in run) so tests can exercise the full
-// parse->emit->format pipeline without touching the filesystem. replies is
-// the subset of commands for which a single-handle reply decoder is emitted;
-// countArrayReplies is the subset with a count+handle-array reply; and
-// decodeStructs is the set of returned-only structs decoded on readback.
-func Generate(data []byte, pkg string, structs, commands, replies, countArrayReplies, decodeStructs, pNextChains, pNextNodes []string) ([]byte, error) {
+// parse->emit->format pipeline without touching the filesystem.
+func Generate(data []byte, pkg string, ps ProofSet) ([]byte, error) {
 	reg, err := gen.Parse(data)
 	if err != nil {
 		return nil, err
 	}
-	raw, err := gen.NewEmitter(reg, structs, commands).
-		WithReplies(replies).
-		WithCountArrayReplies(countArrayReplies).
-		WithDecodeStructs(decodeStructs).
-		WithPNextChains(pNextChains).
-		WithPNextNodes(pNextNodes).
+	raw, err := gen.NewEmitter(reg, ps.Structs, ps.Commands).
+		WithReplies(ps.Replies).
+		WithCountArrayReplies(ps.CountArrayReplies).
+		WithDecodeStructs(ps.DecodeStructs).
+		WithPNextChains(ps.PNextChains).
+		WithPNextNodes(ps.PNextNodes).
+		WithPartialStructs(ps.PartialStructs).
+		WithResultReplies(ps.ResultReplies).
+		WithVoidHandleReplies(ps.VoidHandleReplies).
+		WithStructReplies(ps.StructReplies).
+		WithCountStructArrayReplies(ps.CountStructArrayReplies).
+		WithCountHandleArrayStructReplies(ps.CountHandleArrayStructReply).
 		Generate(pkg)
 	if err != nil {
 		return nil, err

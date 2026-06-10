@@ -19,6 +19,8 @@
     <type category="handle"><name>VkFence</name></type>
     <type category="handle"><name>VkSemaphore</name></type>
     <type category="handle"><name>VkBuffer</name></type>
+    <type category="handle"><name>VkRenderPass</name></type>
+    <type category="handle"><name>VkFramebuffer</name></type>
 
     <!-- nested-by-value structs (no sType) -->
     <type category="struct" name="VkExtent3D">
@@ -159,6 +161,46 @@
       <member><type>VkPhysicalDeviceSparseProperties</type> <name>sparseProperties</name></member>
     </type>
 
+    <!-- returned-only structs decoded by the physical-device property queries -->
+    <type category="struct" name="VkMemoryType" returnedonly="true">
+      <member optional="true"><type>VkMemoryPropertyFlags</type>  <name>propertyFlags</name></member>
+      <member><type>uint32_t</type>               <name>heapIndex</name></member>
+    </type>
+    <type category="struct" name="VkMemoryHeap" returnedonly="true">
+      <member><type>VkDeviceSize</type>           <name>size</name></member>
+      <member optional="true"><type>VkMemoryHeapFlags</type>      <name>flags</name></member>
+    </type>
+    <type category="struct" name="VkPhysicalDeviceMemoryProperties" returnedonly="true">
+      <member><type>uint32_t</type>                                     <name>memoryTypeCount</name></member>
+      <member len="memoryTypeCount"><type>VkMemoryType</type>           <name>memoryTypes</name>[<enum>VK_MAX_MEMORY_TYPES</enum>]</member>
+      <member><type>uint32_t</type>                                     <name>memoryHeapCount</name></member>
+      <member len="memoryHeapCount"><type>VkMemoryHeap</type>           <name>memoryHeaps</name>[<enum>VK_MAX_MEMORY_HEAPS</enum>]</member>
+    </type>
+    <type category="struct" name="VkQueueFamilyProperties" returnedonly="true">
+      <member optional="true"><type>VkQueueFlags</type>           <name>queueFlags</name></member>
+      <member><type>uint32_t</type>               <name>queueCount</name></member>
+      <member><type>uint32_t</type>               <name>timestampValidBits</name></member>
+      <member><type>VkExtent3D</type>             <name>minImageTransferGranularity</name></member>
+    </type>
+
+    <!-- command-buffer begin/inheritance info (vkBeginCommandBuffer) -->
+    <type category="struct" name="VkCommandBufferInheritanceInfo">
+      <member values="VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO"><type>VkStructureType</type> <name>sType</name></member>
+      <member optional="true">const <type>void</type>*            <name>pNext</name></member>
+      <member optional="true" noautovalidity="true"><type>VkRenderPass</type>    <name>renderPass</name></member>
+      <member><type>uint32_t</type>               <name>subpass</name></member>
+      <member optional="true" noautovalidity="true"><type>VkFramebuffer</type>   <name>framebuffer</name></member>
+      <member><type>VkBool32</type>               <name>occlusionQueryEnable</name></member>
+      <member optional="true" noautovalidity="true"><type>VkQueryControlFlags</type>    <name>queryFlags</name></member>
+      <member optional="true" noautovalidity="true"><type>VkQueryPipelineStatisticFlags</type> <name>pipelineStatistics</name></member>
+    </type>
+    <type category="struct" name="VkCommandBufferBeginInfo">
+      <member values="VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO"><type>VkStructureType</type> <name>sType</name></member>
+      <member optional="true">const <type>void</type>*            <name>pNext</name></member>
+      <member optional="true"><type>VkCommandBufferUsageFlags</type>  <name>flags</name></member>
+      <member optional="true" noautovalidity="true">const <type>VkCommandBufferInheritanceInfo</type>* <name>pInheritanceInfo</name></member>
+    </type>
+
     <!-- pNext-chain-bearing structs + their accepted extension nodes -->
     <type category="struct" name="VkProtectedSubmitInfo">
       <member values="VK_STRUCTURE_TYPE_PROTECTED_SUBMIT_INFO"><type>VkStructureType</type> <name>sType</name></member>
@@ -225,6 +267,8 @@
     <enum value="14" name="VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO"/>
     <enum value="39" name="VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO"/>
     <enum value="40" name="VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO"/>
+    <enum value="41" name="VK_STRUCTURE_TYPE_COMMAND_BUFFER_INHERITANCE_INFO"/>
+    <enum value="42" name="VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO"/>
     <enum value="4"  name="VK_STRUCTURE_TYPE_SUBMIT_INFO"/>
     <enum value="44" name="VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER"/>
     <enum value="45" name="VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER"/>
@@ -235,6 +279,8 @@
   <enums name="API Constants" type="constants">
     <enum value="16" name="VK_UUID_SIZE"/>
     <enum value="256" name="VK_MAX_PHYSICAL_DEVICE_NAME_SIZE"/>
+    <enum value="32" name="VK_MAX_MEMORY_TYPES"/>
+    <enum value="16" name="VK_MAX_MEMORY_HEAPS"/>
   </enums>
 
   <commands>
@@ -306,6 +352,64 @@
       <param len="bufferMemoryBarrierCount">const <type>VkBufferMemoryBarrier</type>* <name>pBufferMemoryBarriers</name></param>
       <param optional="true"><type>uint32_t</type> <name>imageMemoryBarrierCount</name></param>
       <param len="imageMemoryBarrierCount">const <type>VkImageMemoryBarrier</type>* <name>pImageMemoryBarriers</name></param>
+    </command>
+    <command>
+      <proto><type>void</type> <name>vkGetPhysicalDeviceMemoryProperties</name></proto>
+      <param><type>VkPhysicalDevice</type> <name>physicalDevice</name></param>
+      <param><type>VkPhysicalDeviceMemoryProperties</type>* <name>pMemoryProperties</name></param>
+    </command>
+    <command>
+      <proto><type>void</type> <name>vkGetPhysicalDeviceQueueFamilyProperties</name></proto>
+      <param><type>VkPhysicalDevice</type> <name>physicalDevice</name></param>
+      <param optional="false,true"><type>uint32_t</type>* <name>pQueueFamilyPropertyCount</name></param>
+      <param optional="true" len="pQueueFamilyPropertyCount"><type>VkQueueFamilyProperties</type>* <name>pQueueFamilyProperties</name></param>
+    </command>
+    <command>
+      <proto><type>void</type> <name>vkGetDeviceQueue</name></proto>
+      <param><type>VkDevice</type> <name>device</name></param>
+      <param><type>uint32_t</type> <name>queueFamilyIndex</name></param>
+      <param><type>uint32_t</type> <name>queueIndex</name></param>
+      <param><type>VkQueue</type>* <name>pQueue</name></param>
+    </command>
+    <command>
+      <proto><type>void</type> <name>vkGetImageMemoryRequirements</name></proto>
+      <param><type>VkDevice</type> <name>device</name></param>
+      <param><type>VkImage</type> <name>image</name></param>
+      <param><type>VkMemoryRequirements</type>* <name>pMemoryRequirements</name></param>
+    </command>
+    <command>
+      <proto><type>VkResult</type> <name>vkBindImageMemory</name></proto>
+      <param><type>VkDevice</type> <name>device</name></param>
+      <param externsync="true"><type>VkImage</type> <name>image</name></param>
+      <param><type>VkDeviceMemory</type> <name>memory</name></param>
+      <param><type>VkDeviceSize</type> <name>memoryOffset</name></param>
+    </command>
+    <command>
+      <proto><type>VkResult</type> <name>vkAllocateCommandBuffers</name></proto>
+      <param><type>VkDevice</type> <name>device</name></param>
+      <param>const <type>VkCommandBufferAllocateInfo</type>* <name>pAllocateInfo</name></param>
+      <param len="pAllocateInfo-&gt;commandBufferCount"><type>VkCommandBuffer</type>* <name>pCommandBuffers</name></param>
+    </command>
+    <command>
+      <proto><type>VkResult</type> <name>vkBeginCommandBuffer</name></proto>
+      <param externsync="true"><type>VkCommandBuffer</type> <name>commandBuffer</name></param>
+      <param>const <type>VkCommandBufferBeginInfo</type>* <name>pBeginInfo</name></param>
+    </command>
+    <command>
+      <proto><type>VkResult</type> <name>vkEndCommandBuffer</name></proto>
+      <param externsync="true"><type>VkCommandBuffer</type> <name>commandBuffer</name></param>
+    </command>
+    <command>
+      <proto><type>VkResult</type> <name>vkQueueWaitIdle</name></proto>
+      <param externsync="maybe"><type>VkQueue</type> <name>queue</name></param>
+    </command>
+    <command>
+      <proto><type>VkResult</type> <name>vkWaitForFences</name></proto>
+      <param><type>VkDevice</type> <name>device</name></param>
+      <param><type>uint32_t</type> <name>fenceCount</name></param>
+      <param len="fenceCount">const <type>VkFence</type>* <name>pFences</name></param>
+      <param><type>VkBool32</type> <name>waitAll</name></param>
+      <param><type>uint64_t</type> <name>timeout</name></param>
     </command>
   </commands>
 </registry>

@@ -46,6 +46,24 @@ type Emitter struct {
 	// chain. Looked up via pNextNodeSet.
 	pNextNodes   []string
 	pNextNodeSet map[string]bool
+	// partialStructs is the set of returned-only structs that a query command
+	// encodes as a "_partial" skeleton on the REQUEST side (Mesa
+	// vn_encode_<Struct>_partial): scalars/handles/enums/flags are skipped, but
+	// nested struct members (and fixed-array-of-struct members, with their
+	// array_size(N) prefix) are still walked and emitted as their own _partial.
+	// For each, an Encode<Struct>Partial is emitted and pulled in transitively.
+	// Looked up via partialStructSet.
+	partialStructs   []string
+	partialStructSet map[string]bool
+	// voidReplies, resultReplies, structReplies, countStructArrayReplies and
+	// countHandleArrayStructLenReplies are the reply-decoder shape buckets for
+	// the readback commands (see the With* setters for the exact Mesa shape each
+	// transcribes).
+	voidHandleReplies           []string
+	resultReplies               []string
+	structReplies               []string
+	countStructArrayReplies     []string
+	countHandleArrayStructReply []string
 }
 
 // NewEmitter builds an Emitter over reg for the named structs and commands.
@@ -97,6 +115,69 @@ func (e *Emitter) hasPNextChain(name string) bool {
 	return e.pNextChainSet[name]
 }
 
+// WithPartialStructs marks the returned-only structs for which an
+// Encode<Struct>Partial is emitted (the request-side skeleton a Get*-query
+// sends). Membership is looked up via isPartial; nested struct members are
+// pulled into the partial set transitively.
+func (e *Emitter) WithPartialStructs(structs []string) *Emitter {
+	e.partialStructs = structs
+	e.partialStructSet = map[string]bool{}
+	for _, s := range structs {
+		e.partialStructSet[s] = true
+	}
+	return e
+}
+
+// isPartial reports whether struct name emits an Encode<Struct>Partial.
+func (e *Emitter) isPartial(name string) bool { return e.partialStructSet[name] }
+
+// WithVoidHandleReplies sets the commands whose reply is a single dispatchable
+// handle behind a simple_pointer with NO VkResult (a void command, e.g.
+// vkGetDeviceQueue). Mesa vn_decode_<cmd>_reply: cmd-type echo + simple_pointer
+// + handle.
+func (e *Emitter) WithVoidHandleReplies(cmds []string) *Emitter {
+	e.voidHandleReplies = cmds
+	return e
+}
+
+// WithResultReplies sets the commands whose reply is just the cmd-type echo +
+// VkResult with no out-param (e.g. vkBindImageMemory / vkBeginCommandBuffer /
+// vkEndCommandBuffer / vkQueueWaitIdle / vkWaitForFences). Mesa
+// vn_decode_<cmd>_reply returns VkResult after skipping every in-param.
+func (e *Emitter) WithResultReplies(cmds []string) *Emitter {
+	e.resultReplies = cmds
+	return e
+}
+
+// WithStructReplies sets the commands whose reply decodes a single returned
+// struct behind a simple_pointer with NO VkResult (a void Get*-query, e.g.
+// vkGetImageMemoryRequirements / vkGetPhysicalDeviceMemoryProperties). The
+// decoded struct is the command's pointer-to-returned-struct out-param; a full
+// Decode<Struct> must be emitted for it (WithDecodeStructs).
+func (e *Emitter) WithStructReplies(cmds []string) *Emitter {
+	e.structReplies = cmds
+	return e
+}
+
+// WithCountStructArrayReplies sets the commands whose reply is a uint32
+// out-count + a peeked counted STRUCT array with NO VkResult (a void query,
+// e.g. vkGetPhysicalDeviceQueueFamilyProperties). Like the count+handle-array
+// shape but the array elements are decoded structs.
+func (e *Emitter) WithCountStructArrayReplies(cmds []string) *Emitter {
+	e.countStructArrayReplies = cmds
+	return e
+}
+
+// WithCountHandleArrayStructReplies sets the commands whose reply is a VkResult
+// + a peeked counted HANDLE array whose count comes from a struct field (Mesa
+// `pAllocateInfo ? pAllocateInfo->commandBufferCount : 0`, e.g.
+// vkAllocateCommandBuffers). The array param's len= names a "<struct>-><field>"
+// path rather than a sibling count param.
+func (e *Emitter) WithCountHandleArrayStructReplies(cmds []string) *Emitter {
+	e.countHandleArrayStructReply = cmds
+	return e
+}
+
 // WithPNextNodes marks the sType structs that appear as pNext extension nodes.
 // For each, a self-only encoder (Encode<Struct>Self, the node's members in
 // declaration order, no sType/pNext) and a PNextNode constructor
@@ -140,6 +221,10 @@ func goTypeOf(reg *Registry, m *Member) string {
 		return "[" + fixedArrayDim(reg, m.FixedArrayLen) + "]int32" // fixed int32[N]
 	case m.FixedArrayLen != "" && m.Type == "float":
 		return "[" + fixedArrayDim(reg, m.FixedArrayLen) + "]float32" // fixed float[N]
+	case m.FixedArrayLen != "" && reg != nil && reg.Structs[m.Type] != nil:
+		// fixed array of nested structs (e.g. VkPhysicalDeviceMemoryProperties.
+		// memoryTypes[VK_MAX_MEMORY_TYPES]).
+		return "[" + fixedArrayDim(reg, m.FixedArrayLen) + "]" + m.Type
 	}
 	// Counted pointer = a Go slice. Checked before the scalar switch so a
 	// `const float*`/`const uint32_t*` array member is a slice, not a scalar.
@@ -262,6 +347,18 @@ func (e *Emitter) Generate(pkg string) ([]byte, error) {
 			return nil, fmt.Errorf("gen: pNext node struct %q not found in registry", name)
 		}
 	}
+	for _, name := range e.partialStructs {
+		if e.reg.Structs[name] == nil {
+			return nil, fmt.Errorf("gen: partial struct %q not found in registry", name)
+		}
+	}
+	for _, set := range [][]string{e.voidHandleReplies, e.resultReplies, e.structReplies, e.countStructArrayReplies, e.countHandleArrayStructReply} {
+		for _, name := range set {
+			if e.reg.Commands[name] == nil {
+				return nil, fmt.Errorf("gen: reply command %q not found in registry", name)
+			}
+		}
+	}
 
 	// Collect the nested structs the requested structs/commands reference so
 	// we can emit input types for them too (deterministic, deduplicated).
@@ -269,6 +366,9 @@ func (e *Emitter) Generate(pkg string) ([]byte, error) {
 	// Decode-only structs (and their nested deps) that aren't already covered
 	// by an encoder need their input type emitted too.
 	decodeNeeded := e.neededDecodeStructs()
+	// Partial structs (and their nested deps) need their input type emitted too
+	// if no encode/decode pass already covers them.
+	partialNeeded := e.neededPartialStructs()
 	seen := map[string]bool{}
 	for _, name := range needed {
 		seen[name] = true
@@ -292,8 +392,19 @@ func (e *Emitter) Generate(pkg string) ([]byte, error) {
 			seen[name] = true
 		}
 	}
+	for _, name := range partialNeeded {
+		if !seen[name] {
+			e.emitInputStruct(&b, e.reg.Structs[name])
+			seen[name] = true
+		}
+	}
 	for _, name := range needed {
 		if err := e.emitStructEncoder(&b, e.reg.Structs[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range partialNeeded {
+		if err := e.emitStructPartialEncoder(&b, e.reg.Structs[name]); err != nil {
 			return nil, err
 		}
 	}
@@ -309,6 +420,31 @@ func (e *Emitter) Generate(pkg string) ([]byte, error) {
 	}
 	for _, name := range e.countArrayReplies {
 		if err := e.emitCountArrayReplyDecoder(&b, e.reg.Commands[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range e.resultReplies {
+		if err := e.emitResultReplyDecoder(&b, e.reg.Commands[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range e.voidHandleReplies {
+		if err := e.emitVoidHandleReplyDecoder(&b, e.reg.Commands[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range e.structReplies {
+		if err := e.emitStructReplyDecoder(&b, e.reg.Commands[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range e.countStructArrayReplies {
+		if err := e.emitCountStructArrayReplyDecoder(&b, e.reg.Commands[name]); err != nil {
+			return nil, err
+		}
+	}
+	for _, name := range e.countHandleArrayStructReply {
+		if err := e.emitCountHandleArrayStructReplyDecoder(&b, e.reg.Commands[name]); err != nil {
 			return nil, err
 		}
 	}
@@ -401,6 +537,12 @@ func (e *Emitter) neededStructs() []string {
 	var visit func(name string)
 	visit = func(name string) {
 		if want[name] || e.reg.Structs[name] == nil {
+			return
+		}
+		// A returned-only struct queried by a Get*-command is encoded as its
+		// _partial skeleton (emitted by the partial pass), never as a full
+		// encoder, so it is excluded from the full-encode set here.
+		if e.isPartial(name) {
 			return
 		}
 		want[name] = true
@@ -531,6 +673,86 @@ func (e *Emitter) emitStructEncoder(b *bytes.Buffer, s *Struct) error {
 		}
 	}
 	b.WriteString("}\n\n")
+	return nil
+}
+
+// neededPartialStructs returns the transitive set of structs to emit _partial
+// encoders for: the requested partial structs plus any nested struct types they
+// reference (referenced-before-referencing), since Mesa's _partial walk recurses
+// into nested struct/array-of-struct members as their own _partial.
+func (e *Emitter) neededPartialStructs() []string {
+	want := map[string]bool{}
+	var order []string
+	var visit func(name string)
+	visit = func(name string) {
+		if want[name] || e.reg.Structs[name] == nil {
+			return
+		}
+		want[name] = true
+		for _, m := range e.reg.Structs[name].Members {
+			if e.reg.Structs[m.Type] != nil {
+				visit(m.Type)
+			}
+		}
+		order = append(order, name)
+	}
+	for _, name := range e.partialStructs {
+		visit(name)
+	}
+	return order
+}
+
+// emitStructPartialEncoder emits Encode<Struct>Partial, transcribed from Mesa
+// vn_encode_<Struct>_partial: every scalar/handle/enum/flags/fixed-numeric-array
+// member is SKIPPED (the renderer fills it in), while nested struct members are
+// recursed as their own _partial and fixed-array-of-struct members keep their
+// array_size(N) prefix followed by N element _partials. This is the skeleton a
+// Get*-query sends on the request side.
+func (e *Emitter) emitStructPartialEncoder(b *bytes.Buffer, s *Struct) error {
+	fmt.Fprintf(b, "// Encode%sPartial encodes the request-side _partial skeleton of a\n", s.Name)
+	fmt.Fprintf(b, "// %s, following Mesa vn_encode_%s_partial: scalar members are\n", s.Name, s.Name)
+	fmt.Fprintf(b, "// skipped; nested-struct and fixed-struct-array members are walked.\n")
+	fmt.Fprintf(b, "func Encode%sPartial(enc *vncs.Encoder, v *%s) {\n", s.Name, s.Name)
+	for _, m := range s.Members {
+		if m.IsSType || m.IsPNext {
+			continue
+		}
+		if err := e.emitMemberPartial(b, "v", m); err != nil {
+			return err
+		}
+	}
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitMemberPartial emits the _partial encode of one member: only nested
+// struct-by-value and fixed-array-of-struct members produce output (everything
+// else is skipped, exactly as Mesa's vn_encode_<Struct>_partial comments out the
+// scalar members).
+func (e *Emitter) emitMemberPartial(b *bytes.Buffer, recv string, m *Member) error {
+	if m.IsSType || m.IsPNext {
+		return nil
+	}
+	field := recv + "." + exportName(m.Name)
+	switch {
+	case m.FixedArrayLen != "" && e.reg.Structs[m.Type] != nil:
+		// Fixed-array-of-struct (e.g. VkPhysicalDeviceMemoryProperties.memoryTypes
+		// [VK_MAX_MEMORY_TYPES]): array_size(N) then N element _partials.
+		n := e.fixedArrayN(m.FixedArrayLen)
+		if n == "" {
+			return fmt.Errorf("gen: partial member %s fixed-array length %q has no known value", m.Name, m.FixedArrayLen)
+		}
+		fmt.Fprintf(b, "\tenc.EncodeArraySize(%s)\n", n)
+		fmt.Fprintf(b, "\tfor i := range %s {\n", field)
+		fmt.Fprintf(b, "\t\tEncode%sPartial(enc, &%s[i])\n", m.Type, field)
+		fmt.Fprintf(b, "\t}\n")
+	case !m.Pointer && m.FixedArrayLen == "" && e.reg.Structs[m.Type] != nil:
+		// Nested struct by value (e.g. VkQueueFamilyProperties.minImageTransfer-
+		// Granularity): recurse as its own _partial.
+		fmt.Fprintf(b, "\tEncode%sPartial(enc, &%s)\n", m.Type, field)
+	default:
+		// Scalar/handle/enum/flags/fixed-numeric-array: skipped in _partial.
+	}
 	return nil
 }
 
@@ -803,6 +1025,15 @@ func (e *Emitter) commandSignature(c *Command) (string, error) {
 			sig = append(sig, fmt.Sprintf("%s int32", arg))
 		case !p.Pointer && p.Type == "uint32_t":
 			sig = append(sig, fmt.Sprintf("%s uint32", arg))
+		case !p.Pointer && p.Type == "uint64_t":
+			// by-value uint64 (e.g. vkWaitForFences.timeout).
+			sig = append(sig, fmt.Sprintf("%s uint64", arg))
+		case !p.Pointer && p.Type == "VkBool32":
+			// by-value VkBool32 (e.g. vkWaitForFences.waitAll).
+			sig = append(sig, fmt.Sprintf("%s bool", arg))
+		case !p.Pointer && p.Type == "VkDeviceSize":
+			// by-value VkDeviceSize (e.g. vkBindImageMemory.memoryOffset).
+			sig = append(sig, fmt.Sprintf("%s uint64", arg))
 		case !p.Pointer && isFlags(p.Type):
 			sig = append(sig, fmt.Sprintf("%s uint32", arg))
 		case p.Pointer && p.Type == "uint32_t":
@@ -833,10 +1064,34 @@ func (e *Emitter) emitParam(b *bytes.Buffer, p *Param) {
 	case p.Pointer && p.Len != "" && e.reg.Structs[p.Type] != nil:
 		// Counted array of structs: uint32 count is a separate param; here
 		// Mesa emits `if (p) { array_size(count); for {...} } else array_size(0)`.
+		// For a returned-only struct queried by a Get*-command the element is
+		// encoded as its _partial skeleton (Mesa vn_encode_<Struct>_partial).
+		enc := "Encode" + p.Type
+		if e.isPartial(p.Type) {
+			enc += "Partial"
+		}
 		fmt.Fprintf(b, "\tif len(%s) != 0 {\n", arg)
 		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(uint64(len(%s)))\n", arg)
 		fmt.Fprintf(b, "\t\tfor i := range %s {\n", arg)
-		fmt.Fprintf(b, "\t\t\tEncode%s(enc, &%s[i])\n", p.Type, arg)
+		fmt.Fprintf(b, "\t\t\t%s(enc, &%s[i])\n", enc, arg)
+		fmt.Fprintf(b, "\t\t}\n")
+		fmt.Fprintf(b, "\t} else {\n")
+		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(0)\n")
+		fmt.Fprintf(b, "\t}\n")
+	case p.Pointer && p.Len != "" && e.reg.Handles[p.Type] && strings.Contains(p.Len, "->"):
+		// Counted handle out-array whose element count comes from a struct field
+		// (Mesa `pAllocateInfo ? pAllocateInfo->commandBufferCount : 0`, e.g.
+		// vkAllocateCommandBuffers.pCommandBuffers). Presence is the array
+		// pointer; the encoded count is the struct field, not the slice length.
+		structArg, field := splitStructFieldLen(p.Len)
+		fmt.Fprintf(b, "\tif len(%s) != 0 {\n", arg)
+		fmt.Fprintf(b, "\t\tvar n uint32\n")
+		fmt.Fprintf(b, "\t\tif %s != nil {\n", structArg)
+		fmt.Fprintf(b, "\t\t\tn = %s.%s\n", structArg, exportName(field))
+		fmt.Fprintf(b, "\t\t}\n")
+		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(uint64(n))\n")
+		fmt.Fprintf(b, "\t\tfor i := uint32(0); i < n; i++ {\n")
+		fmt.Fprintf(b, "\t\t\tenc.EncodeHandle(%s[i])\n", arg)
 		fmt.Fprintf(b, "\t\t}\n")
 		fmt.Fprintf(b, "\t} else {\n")
 		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(0)\n")
@@ -851,9 +1106,16 @@ func (e *Emitter) emitParam(b *bytes.Buffer, p *Param) {
 		fmt.Fprintf(b, "\t\tenc.EncodeArraySize(0)\n")
 		fmt.Fprintf(b, "\t}\n")
 	case p.Pointer && e.reg.Structs[p.Type] != nil:
-		// Optional pointer to a (union or sType) struct, e.g. pCreateInfo / pColor.
+		// Optional pointer to a struct, e.g. pCreateInfo / pColor. A returned-only
+		// struct queried by a Get*-command is encoded as its _partial skeleton
+		// (Mesa vn_encode_<Struct>_partial), e.g. vkGetImageMemoryRequirements's
+		// pMemoryRequirements.
+		enc := "Encode" + p.Type
+		if e.isPartial(p.Type) {
+			enc += "Partial"
+		}
 		fmt.Fprintf(b, "\tif enc.EncodeSimplePointer(%s != nil) {\n", arg)
-		fmt.Fprintf(b, "\t\tEncode%s(enc, %s)\n", p.Type, arg)
+		fmt.Fprintf(b, "\t\t%s(enc, %s)\n", enc, arg)
 		fmt.Fprintf(b, "\t}\n")
 	case p.Pointer && e.reg.Handles[p.Type]:
 		// Out handle (e.g. pInstance): encoded only if present (id 0 = NULL).
@@ -871,6 +1133,12 @@ func (e *Emitter) emitParam(b *bytes.Buffer, p *Param) {
 		fmt.Fprintf(b, "\tenc.EncodeInt32(%s) // enum %s\n", arg, p.Type)
 	case !p.Pointer && p.Type == "uint32_t":
 		fmt.Fprintf(b, "\tenc.EncodeUint32(%s)\n", arg)
+	case !p.Pointer && p.Type == "uint64_t":
+		fmt.Fprintf(b, "\tenc.EncodeUint64(%s)\n", arg)
+	case !p.Pointer && p.Type == "VkBool32":
+		fmt.Fprintf(b, "\tenc.EncodeBool32(%s)\n", arg)
+	case !p.Pointer && p.Type == "VkDeviceSize":
+		fmt.Fprintf(b, "\tenc.EncodeDeviceSize(%s)\n", arg)
 	case !p.Pointer && isFlags(p.Type):
 		fmt.Fprintf(b, "\tenc.EncodeFlags(%s)\n", arg)
 	default:
@@ -892,24 +1160,26 @@ func (e *Emitter) commandTypeValue(cmd string) (string, bool) {
 // Mesa src/virtio/venus-protocol/vn_protocol_driver_defines.h. This enum is a
 // Venus-protocol artifact, not part of vk.xml, so the ordinals are kept here.
 var venusCommandTypeValues = map[string]string{
-	"vkCreateInstance":             "0",
-	"vkEnumeratePhysicalDevices":   "2",
-	"vkCreateDevice":               "11",
-	"vkGetDeviceQueue":             "17",
-	"vkQueueSubmit":                "18",
-	"vkQueueWaitIdle":              "19",
-	"vkAllocateMemory":             "21",
-	"vkMapMemory":                  "23",
-	"vkBindImageMemory":            "29",
-	"vkGetImageMemoryRequirements": "31",
-	"vkWaitForFences":              "39",
-	"vkCreateImage":                "54",
-	"vkCreateCommandPool":          "85",
-	"vkAllocateCommandBuffers":     "88",
-	"vkBeginCommandBuffer":         "90",
-	"vkEndCommandBuffer":           "91",
-	"vkCmdClearColorImage":         "119",
-	"vkCmdPipelineBarrier":         "126",
+	"vkCreateInstance":                         "0",
+	"vkEnumeratePhysicalDevices":               "2",
+	"vkGetPhysicalDeviceQueueFamilyProperties": "7",
+	"vkGetPhysicalDeviceMemoryProperties":      "8",
+	"vkCreateDevice":                           "11",
+	"vkGetDeviceQueue":                         "17",
+	"vkQueueSubmit":                            "18",
+	"vkQueueWaitIdle":                          "19",
+	"vkAllocateMemory":                         "21",
+	"vkMapMemory":                              "23",
+	"vkBindImageMemory":                        "29",
+	"vkGetImageMemoryRequirements":             "31",
+	"vkWaitForFences":                          "39",
+	"vkCreateImage":                            "54",
+	"vkCreateCommandPool":                      "85",
+	"vkAllocateCommandBuffers":                 "88",
+	"vkBeginCommandBuffer":                     "90",
+	"vkEndCommandBuffer":                       "91",
+	"vkCmdClearColorImage":                     "119",
+	"vkCmdPipelineBarrier":                     "126",
 }
 
 // emitCommandReplyDecoder emits a Decode_<cmd>_reply that mirrors Mesa's
@@ -1039,6 +1309,226 @@ func (e *Emitter) emitCountArrayReplyDecoder(b *bytes.Buffer, c *Command) error 
 	return nil
 }
 
+// replyHeader emits the const + the cmd-type echo decode shared by every reply
+// decoder, returning the resolved VkCommandTypeEXT ordinal value.
+func (e *Emitter) replyHeader(b *bytes.Buffer, c *Command) (string, error) {
+	cmdToken := "VK_COMMAND_TYPE_" + c.Name + "_EXT"
+	val, ok := e.commandTypeValue(c.Name)
+	if !ok {
+		return "", fmt.Errorf("gen: no VkCommandTypeEXT value for %q", c.Name)
+	}
+	fmt.Fprintf(b, "// %sReplyCmdType is the VkCommandTypeEXT the %s reply echoes\n", exportName(c.Name), c.Name)
+	fmt.Fprintf(b, "// (%s).\n", cmdToken)
+	fmt.Fprintf(b, "const %sReplyCmdType int32 = %s\n\n", exportName(c.Name), val)
+	return cmdToken, nil
+}
+
+// emitResultReplyDecoder emits a Decode_<cmd>_reply for a "result only" reply
+// (Mesa vn_decode_<cmd>_reply for vkBindImageMemory / vkBeginCommandBuffer /
+// vkEndCommandBuffer / vkQueueWaitIdle / vkWaitForFences):
+//
+//	vn_decode_VkCommandTypeEXT(dec, &command_type);
+//	assert(command_type == VK_COMMAND_TYPE_<cmd>_EXT);
+//	vn_decode_VkResult(dec, &ret);
+//	/* skip every in-param */
+//	return ret;
+func (e *Emitter) emitResultReplyDecoder(b *bytes.Buffer, c *Command) error {
+	cmdToken, err := e.replyHeader(b, c)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(b, "// Decode_%s_reply decodes the %s reply, per Mesa\n", c.Name, c.Name)
+	fmt.Fprintf(b, "// vn_decode_%s_reply: command-type echo + VkResult (no out-param).\n", c.Name)
+	fmt.Fprintf(b, "func Decode_%s_reply(dec *vncs.Decoder) (cmdType int32, result int32) {\n", c.Name)
+	fmt.Fprintf(b, "\tcmdType = dec.DecodeInt32() // echoed %s\n", cmdToken)
+	fmt.Fprintf(b, "\tresult = dec.DecodeResult()\n")
+	fmt.Fprintf(b, "\treturn cmdType, result\n")
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitVoidHandleReplyDecoder emits a Decode_<cmd>_reply for a void command whose
+// reply carries a single dispatchable handle behind a simple_pointer and NO
+// VkResult (Mesa vn_decode_vkGetDeviceQueue_reply):
+//
+//	vn_decode_VkCommandTypeEXT(dec, &command_type);
+//	assert(command_type == VK_COMMAND_TYPE_<cmd>_EXT);
+//	/* skip the in-params */
+//	if (vn_decode_simple_pointer(dec)) vn_decode_VkHandle(dec, pHandle);
+func (e *Emitter) emitVoidHandleReplyDecoder(b *bytes.Buffer, c *Command) error {
+	cmdToken, err := e.replyHeader(b, c)
+	if err != nil {
+		return err
+	}
+	var outHandle *Param
+	for _, p := range c.Params {
+		if p.Pointer && e.reg.Handles[p.Type] {
+			outHandle = p
+		}
+	}
+	if outHandle == nil {
+		return fmt.Errorf("gen: command %q has no handle out-param for a void-handle reply", c.Name)
+	}
+	out := lowerName(outHandle.Name)
+	fmt.Fprintf(b, "// Decode_%s_reply decodes the %s reply, per Mesa\n", c.Name, c.Name)
+	fmt.Fprintf(b, "// vn_decode_%s_reply: command-type echo + simple_pointer(%s)\n", c.Name, outHandle.Name)
+	fmt.Fprintf(b, "// (no VkResult — %s returns void). ok is the simple_pointer flag.\n", c.Name)
+	fmt.Fprintf(b, "func Decode_%s_reply(dec *vncs.Decoder) (cmdType int32, %s uint64, ok bool) {\n", c.Name, out)
+	fmt.Fprintf(b, "\tcmdType = dec.DecodeInt32() // echoed %s\n", cmdToken)
+	fmt.Fprintf(b, "\tif dec.DecodeSimplePointer() {\n")
+	fmt.Fprintf(b, "\t\t%s = dec.DecodeHandle()\n", out)
+	fmt.Fprintf(b, "\t\tok = true\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\treturn cmdType, %s, ok\n", out)
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitStructReplyDecoder emits a Decode_<cmd>_reply for a void Get*-query whose
+// reply decodes a single returned struct behind a simple_pointer and NO
+// VkResult (Mesa vn_decode_vkGetImageMemoryRequirements_reply /
+// vn_decode_vkGetPhysicalDeviceMemoryProperties_reply):
+//
+//	vn_decode_VkCommandTypeEXT(dec, &command_type);
+//	assert(command_type == VK_COMMAND_TYPE_<cmd>_EXT);
+//	/* skip the in-params */
+//	if (vn_decode_simple_pointer(dec)) vn_decode_<Struct>(dec, pStruct);
+func (e *Emitter) emitStructReplyDecoder(b *bytes.Buffer, c *Command) error {
+	cmdToken, err := e.replyHeader(b, c)
+	if err != nil {
+		return err
+	}
+	var outStruct *Param
+	for _, p := range c.Params {
+		if p.Pointer && p.Len == "" && e.reg.Structs[p.Type] != nil {
+			outStruct = p
+		}
+	}
+	if outStruct == nil {
+		return fmt.Errorf("gen: command %q has no returned-struct out-param for a struct reply", c.Name)
+	}
+	out := lowerName(outStruct.Name)
+	fmt.Fprintf(b, "// Decode_%s_reply decodes the %s reply, per Mesa\n", c.Name, c.Name)
+	fmt.Fprintf(b, "// vn_decode_%s_reply: command-type echo + simple_pointer(%s)\n", c.Name, outStruct.Name)
+	fmt.Fprintf(b, "// + Decode%s (no VkResult — %s returns void). ok is the\n", outStruct.Type, c.Name)
+	fmt.Fprintf(b, "// simple_pointer flag.\n")
+	fmt.Fprintf(b, "func Decode_%s_reply(dec *vncs.Decoder, %s *%s) (cmdType int32, ok bool) {\n", c.Name, out, outStruct.Type)
+	fmt.Fprintf(b, "\tcmdType = dec.DecodeInt32() // echoed %s\n", cmdToken)
+	fmt.Fprintf(b, "\tif dec.DecodeSimplePointer() {\n")
+	fmt.Fprintf(b, "\t\tDecode%s(dec, %s)\n", outStruct.Type, out)
+	fmt.Fprintf(b, "\t\tok = true\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\treturn cmdType, ok\n")
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitCountStructArrayReplyDecoder emits a Decode_<cmd>_reply for a void query
+// whose reply is a uint32 out-count + a peeked counted STRUCT array and NO
+// VkResult (Mesa vn_decode_vkGetPhysicalDeviceQueueFamilyProperties_reply):
+//
+//	vn_decode_VkCommandTypeEXT(dec, &command_type);
+//	assert(command_type == VK_COMMAND_TYPE_<cmd>_EXT);
+//	if (vn_decode_simple_pointer(dec)) vn_decode_uint32_t(dec, pCount);
+//	if (vn_peek_array_size(dec)) {
+//	    const uint32_t n = vn_decode_array_size(dec, *pCount);
+//	    for (i < n) vn_decode_<Struct>(dec, &pArray[i]);
+//	} else { vn_decode_array_size_unchecked(dec); pArray = NULL; }
+func (e *Emitter) emitCountStructArrayReplyDecoder(b *bytes.Buffer, c *Command) error {
+	cmdToken, err := e.replyHeader(b, c)
+	if err != nil {
+		return err
+	}
+	var countParam, arrayParam *Param
+	for _, p := range c.Params {
+		switch {
+		case p.Pointer && p.Type == "uint32_t":
+			countParam = p
+		case p.Pointer && p.Len != "" && e.reg.Structs[p.Type] != nil:
+			arrayParam = p
+		}
+	}
+	if countParam == nil || arrayParam == nil {
+		return fmt.Errorf("gen: command %q is not a count+struct-array reply shape (count=%v array=%v)", c.Name, countParam, arrayParam)
+	}
+	countName := lowerName(countParam.Name)
+	arrayName := lowerName(arrayParam.Name)
+	fmt.Fprintf(b, "// Decode_%s_reply decodes the %s reply, per Mesa\n", c.Name, c.Name)
+	fmt.Fprintf(b, "// vn_decode_%s_reply: command-type echo + simple_pointer(%s)+uint32\n", c.Name, countParam.Name)
+	fmt.Fprintf(b, "// + peeked counted %s struct array (no VkResult — void query).\n", arrayParam.Name)
+	fmt.Fprintf(b, "// countOK is the count's simple_pointer flag; %s is nil when the\n", arrayName)
+	fmt.Fprintf(b, "// peeked array_size is 0.\n")
+	fmt.Fprintf(b, "func Decode_%s_reply(dec *vncs.Decoder) (cmdType int32, %s uint32, countOK bool, %s []%s) {\n", c.Name, countName, arrayName, arrayParam.Type)
+	fmt.Fprintf(b, "\tcmdType = dec.DecodeInt32() // echoed %s\n", cmdToken)
+	fmt.Fprintf(b, "\tif dec.DecodeSimplePointer() {\n")
+	fmt.Fprintf(b, "\t\t%s = dec.DecodeUint32()\n", countName)
+	fmt.Fprintf(b, "\t\tcountOK = true\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\tif dec.PeekArraySize() != 0 {\n")
+	fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(uint64(%s))\n", countName)
+	fmt.Fprintf(b, "\t\t%s = make([]%s, n)\n", arrayName, arrayParam.Type)
+	fmt.Fprintf(b, "\t\tfor i := range %s {\n", arrayName)
+	fmt.Fprintf(b, "\t\t\tDecode%s(dec, &%s[i])\n", arrayParam.Type, arrayName)
+	fmt.Fprintf(b, "\t\t}\n")
+	fmt.Fprintf(b, "\t} else {\n")
+	fmt.Fprintf(b, "\t\tdec.DecodeArraySizeUnchecked() // consume the array_size(0)\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\treturn cmdType, %s, countOK, %s\n", countName, arrayName)
+	b.WriteString("}\n\n")
+	return nil
+}
+
+// emitCountHandleArrayStructReplyDecoder emits a Decode_<cmd>_reply for a
+// VkResult + a peeked counted HANDLE array whose count comes from a struct field
+// (Mesa vn_decode_vkAllocateCommandBuffers_reply):
+//
+//	vn_decode_VkCommandTypeEXT(dec, &command_type);
+//	assert(command_type == VK_COMMAND_TYPE_<cmd>_EXT);
+//	vn_decode_VkResult(dec, &ret);
+//	if (vn_peek_array_size(dec)) {
+//	    const uint32_t n = vn_decode_array_size(dec, pAllocateInfo->commandBufferCount);
+//	    for (i < n) vn_decode_VkHandle(dec, &pArray[i]);
+//	} else { vn_decode_array_size_unchecked(dec); pArray = NULL; }
+//	return ret;
+//
+// The count bound is supplied by the caller (the struct field) as maxCount.
+func (e *Emitter) emitCountHandleArrayStructReplyDecoder(b *bytes.Buffer, c *Command) error {
+	cmdToken, err := e.replyHeader(b, c)
+	if err != nil {
+		return err
+	}
+	var arrayParam *Param
+	for _, p := range c.Params {
+		if p.Pointer && p.Len != "" && e.reg.Handles[p.Type] && strings.Contains(p.Len, "->") {
+			arrayParam = p
+		}
+	}
+	if arrayParam == nil {
+		return fmt.Errorf("gen: command %q is not a struct-field-counted handle-array reply shape", c.Name)
+	}
+	arrayName := lowerName(arrayParam.Name)
+	fmt.Fprintf(b, "// Decode_%s_reply decodes the %s reply, per Mesa\n", c.Name, c.Name)
+	fmt.Fprintf(b, "// vn_decode_%s_reply: command-type echo + VkResult + peeked counted\n", c.Name)
+	fmt.Fprintf(b, "// %s handle array bounded by maxCount (the caller's\n", arrayParam.Name)
+	fmt.Fprintf(b, "// %s, i.e. the requested commandBufferCount). %s is nil\n", arrayParam.Len, arrayName)
+	fmt.Fprintf(b, "// when the peeked array_size is 0.\n")
+	fmt.Fprintf(b, "func Decode_%s_reply(dec *vncs.Decoder, maxCount uint32) (cmdType int32, result int32, %s []uint64) {\n", c.Name, arrayName)
+	fmt.Fprintf(b, "\tcmdType = dec.DecodeInt32() // echoed %s\n", cmdToken)
+	fmt.Fprintf(b, "\tresult = dec.DecodeResult()\n")
+	fmt.Fprintf(b, "\tif dec.PeekArraySize() != 0 {\n")
+	fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(uint64(maxCount))\n")
+	fmt.Fprintf(b, "\t\t%s = make([]uint64, n)\n", arrayName)
+	fmt.Fprintf(b, "\t\tfor i := range %s {\n", arrayName)
+	fmt.Fprintf(b, "\t\t\t%s[i] = dec.DecodeHandle()\n", arrayName)
+	fmt.Fprintf(b, "\t\t}\n")
+	fmt.Fprintf(b, "\t} else {\n")
+	fmt.Fprintf(b, "\t\tdec.DecodeArraySizeUnchecked() // consume the array_size(0)\n")
+	fmt.Fprintf(b, "\t}\n")
+	fmt.Fprintf(b, "\treturn cmdType, result, %s\n", arrayName)
+	b.WriteString("}\n\n")
+	return nil
+}
+
 // emitStructDecoder emits a Decode<Struct> that mirrors Mesa's
 // vn_decode_<Struct>: for a returned-only (no-sType) struct it reads each
 // member in declaration order; for an sType struct it reads sType + the pNext
@@ -1072,6 +1562,26 @@ func (e *Emitter) emitMemberDecode(b *bytes.Buffer, recv string, m *Member) erro
 		return nil
 	}
 	field := recv + "." + exportName(m.Name)
+	if m.FixedArrayLen != "" && e.reg.Structs[m.Type] != nil {
+		// Fixed array of nested structs (e.g. VkPhysicalDeviceMemoryProperties.
+		// memoryTypes[VK_MAX_MEMORY_TYPES]). Mesa:
+		//   const uint32_t n = vn_decode_array_size(dec, N);
+		//   for (i < n) vn_decode_<Elem>(dec, &val->field[i]);
+		if strings.Contains(m.FixedArrayLen, "[multidim]") {
+			return fmt.Errorf("gen: member %s is a multi-dimensional fixed array (%q), not supported", m.Name, m.FixedArrayLen)
+		}
+		n := e.fixedArrayN(m.FixedArrayLen)
+		if n == "" {
+			return fmt.Errorf("gen: member %s fixed-array length %q has no known value", m.Name, m.FixedArrayLen)
+		}
+		fmt.Fprintf(b, "\t{\n")
+		fmt.Fprintf(b, "\t\tn := dec.DecodeArraySize(%s)\n", n)
+		fmt.Fprintf(b, "\t\tfor i := uint64(0); i < n; i++ {\n")
+		fmt.Fprintf(b, "\t\t\tDecode%s(dec, &%s[i])\n", m.Type, field)
+		fmt.Fprintf(b, "\t\t}\n")
+		fmt.Fprintf(b, "\t}\n")
+		return nil
+	}
 	if m.FixedArrayLen != "" {
 		return e.emitFixedArrayMemberDecode(b, field, m)
 	}
@@ -1169,6 +1679,17 @@ func lowerName(name string) string {
 		return name
 	}
 	return strings.ToLower(name[:1]) + name[1:]
+}
+
+// splitStructFieldLen splits a "struct->field" len= token (e.g.
+// "pAllocateInfo->commandBufferCount") into the lower-cased Go arg name of the
+// struct param and the raw field name. The arrow is the only delimiter Mesa
+// uses for a count drawn from a struct member.
+func splitStructFieldLen(lenAttr string) (structArg, field string) {
+	i := strings.Index(lenAttr, "->")
+	structArg = lowerName(lenAttr[:i])
+	field = lenAttr[i+len("->"):]
+	return structArg, field
 }
 
 func fileHeader(pkg string) string {

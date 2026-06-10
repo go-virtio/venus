@@ -30,7 +30,7 @@ func fullXML(t *testing.T) []byte {
 }
 
 func TestGenerate(t *testing.T) {
-	src, err := Generate(fullXML(t), "proof", proofStructs, proofCommands, proofReplies, proofCountArrayReplies, proofDecodeStructs, proofPNextChains, proofPNextNodes)
+	src, err := Generate(fullXML(t), "proof", proofSets())
 	if err != nil {
 		t.Fatalf("Generate: %v", err)
 	}
@@ -44,6 +44,14 @@ func TestGenerate(t *testing.T) {
 		"func Decode_vkEnumeratePhysicalDevices_reply(",
 		"func DecodeVkMemoryRequirements(",
 		"func DecodeVkPhysicalDeviceProperties(",
+		"func Encode_vkGetDeviceQueue(",
+		"func Encode_vkWaitForFences(",
+		"func EncodeVkPhysicalDeviceMemoryPropertiesPartial(",
+		"func Decode_vkGetPhysicalDeviceMemoryProperties_reply(",
+		"func Decode_vkGetPhysicalDeviceQueueFamilyProperties_reply(",
+		"func Decode_vkAllocateCommandBuffers_reply(",
+		"func Decode_vkBindImageMemory_reply(",
+		"func DecodeVkPhysicalDeviceMemoryProperties(",
 	} {
 		if !strings.Contains(string(src), want) {
 			t.Errorf("missing %q", want)
@@ -52,13 +60,13 @@ func TestGenerate(t *testing.T) {
 }
 
 func TestGenerateParseError(t *testing.T) {
-	if _, err := Generate([]byte("<registry><types"), "proof", proofStructs, proofCommands, proofReplies, proofCountArrayReplies, proofDecodeStructs, proofPNextChains, proofPNextNodes); err == nil {
+	if _, err := Generate([]byte("<registry><types"), "proof", proofSets()); err == nil {
 		t.Error("expected parse error")
 	}
 }
 
 func TestGenerateEmitError(t *testing.T) {
-	if _, err := Generate(fullXML(t), "proof", []string{"VkNope"}, nil, nil, nil, nil, nil, nil); err == nil {
+	if _, err := Generate(fullXML(t), "proof", ProofSet{Structs: []string{"VkNope"}}); err == nil {
 		t.Error("expected emit error for unknown struct")
 	}
 }
@@ -126,7 +134,7 @@ func TestGenerateFormatError(t *testing.T) {
 	saved := formatSource
 	formatSource = func([]byte) ([]byte, error) { return nil, errors.New("boom") }
 	defer func() { formatSource = saved }()
-	if _, err := Generate(fullXML(t), "proof", proofStructs, proofCommands, proofReplies, proofCountArrayReplies, proofDecodeStructs, proofPNextChains, proofPNextNodes); err == nil {
+	if _, err := Generate(fullXML(t), "proof", proofSets()); err == nil {
 		t.Error("expected gofmt error")
 	}
 }

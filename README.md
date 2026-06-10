@@ -29,15 +29,29 @@ from Mesa's generated headers — no GPU, no host required.**
   chains**, **count+array reply decoders**, and **returned-only struct
   decoders**).
 - `cmd/vkgen` — the generator CLI (`-xml`, `-out`, `-pkg`).
-- `proof` — a generated proof subset spanning the clear-image command closure
-  (`vkCreateInstance/Device/Image`, `vkAllocateMemory`, `vkCreateCommandPool`,
-  `vkEnumeratePhysicalDevices`, `vkCmdClearColorImage`, `vkQueueSubmit`,
-  `vkCmdPipelineBarrier`, plus the `VkClearColorValue` union, the
+- `proof` — a generated proof subset spanning the **full clear-image →
+  readback** command closure: `vkCreateInstance/Device/Image`,
+  `vkAllocateMemory`, `vkCreateCommandPool`, `vkEnumeratePhysicalDevices`,
+  `vkGetPhysicalDeviceMemoryProperties`,
+  `vkGetPhysicalDeviceQueueFamilyProperties`, `vkGetDeviceQueue`,
+  `vkGetImageMemoryRequirements`, `vkBindImageMemory`,
+  `vkAllocateCommandBuffers`, `vkBeginCommandBuffer`, `vkEndCommandBuffer`,
+  `vkCmdClearColorImage`, `vkQueueSubmit`, `vkCmdPipelineBarrier`,
+  `vkQueueWaitIdle`, `vkWaitForFences`; plus the `VkClearColorValue` union, the
   `VkSubmitInfo` / `VkImageMemoryBarrier` `pNext`-chain encoders, the
-  `vkEnumeratePhysicalDevices` count+array reply decoder, and the
-  `VkMemoryRequirements` / `VkPhysicalDeviceProperties` returned-struct
-  decoders) whose encoded/decoded bytes are asserted against independently
-  hand-derived Mesa bytes.
+  `VkCommandBufferBeginInfo` / `VkCommandBufferInheritanceInfo` encoders, the
+  request-side `_partial` skeleton encoders the `Get*`-queries send, the
+  `vkEnumeratePhysicalDevices` count+handle-array and
+  `vkGetPhysicalDeviceQueueFamilyProperties` count+struct-array reply decoders,
+  the `vkAllocateCommandBuffers` struct-field-counted handle-array reply, the
+  void single-handle (`vkGetDeviceQueue`) / single-struct
+  (`vkGetImageMemoryRequirements`, `vkGetPhysicalDeviceMemoryProperties`) and
+  result-only (`vkBindImageMemory` / `vkBegin`/`vkEndCommandBuffer` /
+  `vkQueueWaitIdle` / `vkWaitForFences`) reply decoders, and the
+  `VkMemoryRequirements` / `VkPhysicalDeviceProperties` /
+  `VkPhysicalDeviceMemoryProperties` (fixed-array-of-struct) /
+  `VkQueueFamilyProperties` returned-struct decoders — whose encoded/decoded
+  bytes are all asserted against independently hand-derived Mesa bytes.
 
 All five packages are at 100% statement coverage; `CGO_ENABLED=0 go build`
 clean; zero external dependencies.
@@ -50,9 +64,11 @@ clean; zero external dependencies.
 ## What is NOT here yet
 
 - **The full encoder closure** (~120–200 structs/commands) for a real
-  "create instance → device → image → clear → readback" path. The clear-image
-  *core* — including the submit/barrier framing and the count/readback decode
-  rungs below — now encodes/decodes; what remains is breadth (the long tail of
+  "create instance → device → image → clear → readback" path. The whole
+  clear-to-readback *walk* — instance/device/queue setup, image creation +
+  memory binding, command-buffer record/submit/barrier, and the
+  queue-idle/fence completion + the property/requirement readbacks — now
+  encodes/decodes; what remains is breadth (the long tail of unrelated
   structs/commands) plus the few generator features still stopped at a clean
   boundary (below).
 - **Generator rungs now closed** (encoded/decoded bytes asserted against
@@ -64,13 +80,33 @@ clean; zero external dependencies.
     `VkProtectedSubmitInfo` chain) and `VkImageMemoryBarrier`.
   - **Count+array reply decoders** — `vkEnumeratePhysicalDevices`-style replies
     (`simple_pointer` out-count + a peeked counted handle array, with the
-    `vn_decode_array_size_unchecked` empty arm).
-  - **Returned-only struct decoders** — `VkMemoryRequirements` and the full
+    `vn_decode_array_size_unchecked` empty arm); plus the **count+struct-array**
+    variant (`vkGetPhysicalDeviceQueueFamilyProperties`) and the
+    **struct-field-counted** handle-array variant
+    (`vkAllocateCommandBuffers`, count from `pAllocateInfo->commandBufferCount`).
+  - **The remaining reply-decoder shapes** — void single-handle
+    (`vkGetDeviceQueue`), void single-struct
+    (`vkGetImageMemoryRequirements`, `vkGetPhysicalDeviceMemoryProperties`),
+    and result-only (`vkBindImageMemory`, `vkBegin`/`vkEndCommandBuffer`,
+    `vkQueueWaitIdle`, `vkWaitForFences`).
+  - **Request-side `_partial` skeleton encoders** — the `Get*`-queries send a
+    `vn_encode_<Struct>_partial` skeleton (scalars skipped; nested-struct and
+    fixed-array-of-struct members walked with their `array_size(N)` prefix),
+    transcribed for `VkMemoryRequirements`, `VkPhysicalDeviceMemoryProperties`
+    and `VkQueueFamilyProperties`.
+  - **Returned-only struct decoders** — `VkMemoryRequirements`, the full
     `VkPhysicalDeviceProperties` decode (enum, `char[N]`/`uint8[N]` fixed
-    arrays, `size_t`, nested `VkPhysicalDeviceLimits`/`SparseProperties`).
+    arrays, `size_t`, nested `VkPhysicalDeviceLimits`/`SparseProperties`),
+    `VkQueueFamilyProperties`, and `VkPhysicalDeviceMemoryProperties` with its
+    **fixed-array-of-struct** members (`memoryTypes[VK_MAX_MEMORY_TYPES]` /
+    `memoryHeaps[VK_MAX_MEMORY_HEAPS]`).
   - **`vkQueueSubmit` / `vkCmdPipelineBarrier` framing** — `VkSubmitInfo`
     (`pNext` chain + counted handle/`VkFlags` array members) and the
     three-barrier-group pipeline-barrier command.
+  - **Command-buffer recording** — `VkCommandBufferBeginInfo` (with the optional
+    `pInheritanceInfo` → full `VkCommandBufferInheritanceInfo` arm) and the
+    by-value `uint64`/`VkBool32`/`VkDeviceSize` command params
+    (`vkWaitForFences` timeout/waitAll, `vkBindImageMemory` memoryOffset).
 - **Generator gaps still open**, each stopped at a clean boundary rather than
   guessed:
   - **The full `VkPhysicalDeviceLimits` (all ~106 members).** The decode
@@ -88,6 +124,15 @@ clean; zero external dependencies.
     per-parent generated switch (not in `vk.xml`); the generator takes the
     accepted node set as an explicit input rather than reconstructing that
     switch.
+  - **The actual pixel readback (host image → guest bytes).** The command
+    closure to *reach* a cleared, host-side image and learn its memory layout is
+    now complete and byte-verified (bind → record → submit → wait-idle/fence →
+    `vkGetImageMemoryRequirements` / `vkGetPhysicalDeviceMemoryProperties`). But
+    moving the cleared pixels back into guest memory is **not a header-derivable
+    wire encoding**: it is `vkMapMemory` over a `RESOURCE_BLOB`/shared-memory
+    window whose contents and coherency are defined by the host renderer and the
+    virtio-gpu blob transport, not by `vn_protocol_driver_*`. That step is part
+    of the transport boundary below and is deliberately *not* guessed here.
 - **The transport — the real unknown.** Venus needs a virtio-gpu context with
   `context_init = VIRTIO_GPU_CAPSET_VENUS (4)` (requiring `F_CONTEXT_INIT` +
   `RESOURCE_BLOB`), a guest/host **shared-memory command ring**, `EXECBUFFER`
