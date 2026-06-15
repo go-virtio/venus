@@ -1,0 +1,147 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Repo is 100% tested; gate the merged coverage at that level.
+  COVERAGE_FLOOR: "100.0"
+
+jobs:
+  # ----------------------------------------------------------------------
+  # Native runners: amd64 (x86_64) and arm64 (aarch64).
+  # ----------------------------------------------------------------------
+  native:
+    name: native (${{ matrix.arch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-latest
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: go vet
+        run: CGO_ENABLED=0 go vet ./...
+
+      - name: test (merged coverage)
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          set -euo pipefail
+          COVDIR="$(mktemp -d)"
+          # One coverage-instrumented test binary per package, all reporting
+          # against ./... so the merged profile covers the whole module.
+          # Each binary runs in its own package dir so relative testdata
+          # paths and the cmd/vkgen self-re-exec (os.Args[0]) resolve.
+          for pkg in $(go list ./...); do
+            reldir="${pkg#github.com/go-virtio/venus}"
+            reldir="${reldir#/}"
+            [ -z "$reldir" ] && reldir="."
+            bin="$(mktemp -d)/pkg.test"
+            go test -c -cover -coverpkg=./... -o "$bin" "$pkg"
+            ( cd "$reldir" && GOCOVERDIR="$COVDIR" "$bin" -test.v -test.gocoverdir="$COVDIR" )
+          done
+          echo "=== merged coverage ==="
+          go tool covdata percent -i="$COVDIR"
+          total="$(go tool covdata func -i="$COVDIR" | awk '/^total/{gsub(/%/,"",$NF); print $NF}')"
+          echo "total coverage: ${total}% (floor ${COVERAGE_FLOOR}%)"
+          awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN{exit !(t+0 >= f+0)}' \
+            || { echo "coverage ${total}% below floor ${COVERAGE_FLOOR}%"; exit 1; }
+
+  # ----------------------------------------------------------------------
+  # Emulated runners: riscv64, loong64, ppc64le, s390x.
+  # Cross-compile per-package coverage test binaries (CGO_ENABLED=0) and run
+  # each under qemu-user via docker, in its own package dir. Coverage from
+  # all binaries is merged into one GOCOVERDIR and gated at the repo floor.
+  #
+  # venus is a pure-Go, dependency-free module: every test is in-process
+  # (Venus command encoding, virtio-gpu / vn-ring transport structs, pixel
+  # readback decoders). No test loads a real Vulkan ICD, touches /dev/dri,
+  # dlopen()s a renderer, or talks to a live GPU, so nothing needs to be
+  # skipped under headless qemu-user -- the full suite runs on every arch.
+  # The wire structs are explicitly little-endian (binary.LittleEndian);
+  # s390x (big-endian) exercises that encoding for real.
+  # ----------------------------------------------------------------------
+  emulated:
+    name: emulated (${{ matrix.arch }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: riscv64
+            image: debian:trixie
+            qemu_cpu: rv64,v=true,vlen=128
+          - arch: loong64
+            goarch: loong64
+            image: ghcr.io/loong64/debian:trixie
+            qemu_cpu: la464
+          - arch: ppc64le
+            image: debian:trixie
+            qemu_cpu: power9
+          - arch: s390x
+            image: debian:trixie
+            qemu_cpu: qemu
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+
+      - name: register binfmt handlers
+        run: docker run --rm --privileged tonistiigi/binfmt --install all
+
+      - name: build + test under qemu/${{ matrix.arch }} (merged coverage)
+        env:
+          CGO_ENABLED: "0"
+          GOOS: linux
+          GOARCH: ${{ matrix.arch }}
+          QEMU_CPU: ${{ matrix.qemu_cpu }}
+          IMAGE: ${{ matrix.image }}
+        run: |
+          set -euo pipefail
+          BINDIR="$(mktemp -d)"
+          COVDIR="$PWD/.covdata"
+          rm -rf "$COVDIR"; mkdir -p "$COVDIR"
+          # Cross-compile one coverage test binary per package.
+          for pkg in $(go list ./...); do
+            name="$(echo "$pkg" | tr '/' '_')"
+            go test -c -cover -coverpkg=./... -o "$BINDIR/$name.test" "$pkg"
+          done
+          # Run each binary under qemu-user, cwd = its package dir so that
+          # relative testdata and the cmd/vkgen re-exec resolve correctly.
+          # GOCOVERDIR is shared so covdata can merge across all binaries.
+          for pkg in $(go list ./...); do
+            name="$(echo "$pkg" | tr '/' '_')"
+            reldir="${pkg#github.com/go-virtio/venus}"
+            reldir="${reldir#/}"
+            [ -z "$reldir" ] && reldir="."
+            echo "=== $pkg (cwd=$reldir) ==="
+            docker run --rm --platform "linux/${GOARCH}" \
+              -e QEMU_CPU="$QEMU_CPU" -e GOCOVERDIR=/cov \
+              -v "$PWD":/src -v "$BINDIR":/bins -v "$COVDIR":/cov \
+              -w "/src/$reldir" "$IMAGE" \
+              "/bins/$name.test" -test.v -test.gocoverdir=/cov
+          done
+          echo "=== merged coverage ==="
+          go tool covdata percent -i="$COVDIR"
+          total="$(go tool covdata func -i="$COVDIR" | awk '/^total/{gsub(/%/,"",$NF); print $NF}')"
+          echo "total coverage: ${total}% (floor ${COVERAGE_FLOOR}%)"
+          awk -v t="$total" -v f="$COVERAGE_FLOOR" 'BEGIN{exit !(t+0 >= f+0)}' \
+            || { echo "coverage ${total}% below floor ${COVERAGE_FLOOR}%"; exit 1; }

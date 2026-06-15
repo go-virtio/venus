@@ -57,7 +57,7 @@ func TestEncodeCreateInfo_FieldOrder(t *testing.T) {
 		ExtraSize:    64,
 	}
 	b := EncodeCreateInfo(ci)
-	if len(b) != CreateInfoBodySize || len(b) != 88 {
+	if len(b) != CreateInfoBodySize || CreateInfoBodySize != 88 {
 		t.Fatalf("length: got %d, want 88", len(b))
 	}
 	if binary.LittleEndian.Uint32(b[0:4]) != 0x11 {
