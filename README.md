@@ -1,3 +1,5 @@
+<p align="center"><img src="https://raw.githubusercontent.com/go-virtio/brand/main/social/go-virtio.png" alt="go-virtio/venus" width="720"></p>
+
 # go-virtio/venus
 
 Pure-Go (CGO=0) groundwork for **Venus** — the Vulkan-over-virtio protocol —
