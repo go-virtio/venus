@@ -2,6 +2,10 @@
 
 # go-virtio/venus
 
+[![Go Reference](https://pkg.go.dev/badge/github.com/go-virtio/venus.svg)](https://pkg.go.dev/github.com/go-virtio/venus)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://opensource.org/licenses/BSD-3-Clause)
+[![CI](https://github.com/go-virtio/venus/actions/workflows/ci.yml/badge.svg)](https://github.com/go-virtio/venus/actions/workflows/ci.yml)
+
 Pure-Go (CGO=0) groundwork for **Venus** — the Vulkan-over-virtio protocol —
 as a guest-side counterpart to the [`go-virtio`](https://github.com/go-virtio)
 virtio-gpu work. Vulkan-in-Go is a genuinely larger undertaking than the
