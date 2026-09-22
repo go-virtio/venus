@@ -57,8 +57,24 @@ func TestEncodeCreateInfo_FieldOrder(t *testing.T) {
 		ExtraSize:    64,
 	}
 	b := EncodeCreateInfo(ci)
-	if len(b) != CreateInfoBodySize || len(b) != 88 {
-		t.Fatalf("length: got %d, want 88", len(b))
+	// Two separate claims, and they were one condition before:
+	//
+	//	if len(b) != CreateInfoBodySize || len(b) != 88 {
+	//
+	// CreateInfoBodySize is 4+4+10*8, which IS 88, so that behaved correctly
+	// — and `go vet` still rejected it, because `x != A || x != B` is a missed
+	// `&&` almost every time it is written. `go test` runs vet, so this whole
+	// package failed to build for its tests: they ran nowhere.
+	//
+	// What the line meant is below. The wire layout is 88 bytes by
+	// specification; the constant must equal that, and the encoder must
+	// produce it. If the formula is ever edited, the first check names the
+	// constant rather than blaming the encoder.
+	if CreateInfoBodySize != 88 {
+		t.Fatalf("CreateInfoBodySize = %d, want 88 (the wire layout is fixed)", CreateInfoBodySize)
+	}
+	if len(b) != CreateInfoBodySize {
+		t.Fatalf("length: got %d, want %d", len(b), CreateInfoBodySize)
 	}
 	if binary.LittleEndian.Uint32(b[0:4]) != 0x11 {
 		t.Errorf("flags@0: got 0x%x", binary.LittleEndian.Uint32(b[0:4]))

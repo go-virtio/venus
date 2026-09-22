@@ -1,0 +1,41 @@
+name: ci
+
+# This repository had no CI at all. Six packages have tests, and one of them —
+# ring — could not even build its test binary: `go test` runs `go vet`, and vet
+# rejected
+#
+#	if len(b) != CreateInfoBodySize || len(b) != 88 {
+#
+# as a suspect `or`. The condition behaved correctly (the constant IS 88), but
+# the package failed to build for its tests, so they ran nowhere. A single
+# `go vet` on any machine would have said so; nothing ran one.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: build + vet + test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: gofmt
+        run: |
+          drift=$(gofmt -l .)
+          if [ -n "$drift" ]; then echo "::error::not gofmt-clean:"; echo "$drift"; exit 1; fi
+      - name: build
+        run: go build ./...
+      - name: vet
+        run: go vet ./...
+      - name: test
+        run: go test -race -timeout 10m ./...
